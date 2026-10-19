@@ -1,0 +1,21 @@
+# Core Backend & Machine Learning Dependencies
+Flask>=3.0.0,<4.0.0
+scikit-learn>=1.4.0,<2.0.0
+joblib>=1.3.2,<2.0.0
+pandas>=2.1.0,<3.0.0
+numpy>=1.26.0,<3.0.0
+scipy>=1.11.0,<2.0.0
+
+# OCR & Image Processing
+Pillow>=10.2.0,<12.0.0
+pytesseract>=0.3.10,<1.0.0
+
+# Production WSGI Server (used by Cloud Run / Docker)
+gunicorn>=21.2.0,<24.0.0
+
+# Testing
+pytest>=8.0.0,<9.0.0
+
+# Optional DistilBERT Upgrade (uncomment or install separately for train_distilbert.py)
+# torch>=2.2.0
+# transformers>=4.38.0

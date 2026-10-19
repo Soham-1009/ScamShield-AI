@@ -1,0 +1,2 @@
+# Placeholder to keep data/ directory in version control.
+# Place fake_job_postings.csv in this directory before running train_model.py.

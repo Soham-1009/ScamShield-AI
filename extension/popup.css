@@ -1,0 +1,381 @@
+:root {
+  --bg-page: #f8fafc;
+  --bg-card: #ffffff;
+  --navy: #1b365d;
+  --navy-dark: #0f2442;
+  --navy-light: #e8eef5;
+  --red: #b91c1c;
+  --red-bg: #fef2f2;
+  --red-border: #fecaca;
+  --amber: #b45309;
+  --amber-bg: #fffbeb;
+  --amber-border: #fde68a;
+  --green: #166534;
+  --green-bg: #dcfce7;
+  --text-main: #0f172a;
+  --text-sub: #334155;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 400px;
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.42;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.app-header {
+  background-color: var(--navy);
+  color: #ffffff;
+  padding: 10px 14px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shield-icon {
+  width: 22px;
+  height: 22px;
+  fill: #ffffff;
+}
+
+.app-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.app-subtitle {
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.status-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.status-online {
+  background-color: var(--green-bg);
+  color: var(--green);
+}
+
+.app-main {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btn-primary {
+  width: 100%;
+  background-color: var(--navy);
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background-color: var(--navy-dark);
+}
+
+.btn-secondary {
+  background-color: var(--navy-light);
+  color: var(--navy);
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
+.btn-secondary:hover {
+  background-color: #d8e4f2;
+}
+
+.btn-outline {
+  background-color: #ffffff;
+  color: var(--navy);
+  border-color: var(--navy);
+}
+
+.btn-outline:hover {
+  background-color: var(--navy-light);
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.btn-icon {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.main-controls {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.job-textarea {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  resize: vertical;
+}
+
+.job-textarea:focus {
+  outline: 2px solid var(--navy);
+  border-color: var(--navy);
+}
+
+.manual-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  text-decoration: underline;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ocr-row {
+  border-top: 1px dashed var(--border);
+  padding-top: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ocr-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-sub);
+}
+
+.ocr-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.file-input {
+  font-size: 11px;
+  max-width: 220px;
+}
+
+/* Error Card */
+.error-card {
+  background-color: var(--red-bg);
+  border-color: var(--red-border);
+  border-left: 4px solid var(--red);
+}
+
+.error-title {
+  color: var(--red);
+  display: block;
+  margin-bottom: 2px;
+  font-size: 12.5px;
+}
+
+.error-message {
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+/* Crisp Results Card */
+.results-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.result-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.small-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.risk-headline {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.text-high {
+  color: var(--red);
+}
+
+.text-medium {
+  color: var(--amber);
+}
+
+.text-low {
+  color: var(--navy);
+}
+
+.score-pill {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.pill-high {
+  background-color: var(--red-bg);
+  color: var(--red);
+  border: 1px solid var(--red-border);
+}
+
+.pill-medium {
+  background-color: var(--amber-bg);
+  color: var(--amber);
+  border: 1px solid var(--amber-border);
+}
+
+.pill-low {
+  background-color: var(--navy-light);
+  color: var(--navy);
+}
+
+.one-liner {
+  font-size: 12.5px;
+  color: var(--text-sub);
+  font-weight: 500;
+}
+
+.result-block {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.block-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--navy);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.flags-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.flag-item {
+  background-color: var(--red-bg);
+  border: 1px solid var(--red-border);
+  border-left: 3px solid var(--red);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.flag-reason {
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+
+.flag-words {
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+.flag-words code {
+  background: #ffffff;
+  border: 1px solid var(--red-border);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.actions-list {
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.ml-strip {
+  background-color: var(--navy-light);
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: var(--navy);
+}
+
+.tiny-note {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}

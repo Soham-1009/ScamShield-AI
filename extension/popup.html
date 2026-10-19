@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScamShield AI</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-row">
+      <div class="brand-title-group">
+        <svg class="shield-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm-1 14l-4-4 1.41-1.41L11 13.17l5.59-5.59L18 9l-7 7z"/>
+        </svg>
+        <div>
+          <h1 class="app-title">ScamShield AI</h1>
+          <p class="app-subtitle">Job &amp; Internship Scam Checker</p>
+        </div>
+      </div>
+      <span class="status-pill status-online">Works in Browser</span>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- Main Screen Controls (Always Visible — No Hidden Dropdown) -->
+    <section class="card input-card">
+      <button type="button" id="scan-page-btn" class="btn btn-primary">
+        <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h10v2H4z"/>
+        </svg>
+        Scan &amp; Check This Job Page
+      </button>
+
+      <div class="main-controls">
+        <textarea
+          id="job-text-input"
+          class="job-textarea"
+          rows="3"
+          maxlength="25000"
+          placeholder="Extracted page text appears here, or paste any job description / recruiter message..."
+        ></textarea>
+
+        <div class="manual-actions">
+          <button type="button" id="analyze-btn" class="btn btn-secondary">Check Pasted Text</button>
+          <button type="button" id="clear-text-btn" class="link-btn">Clear</button>
+        </div>
+
+        <div class="ocr-row">
+          <span class="ocr-label">Screenshot check:</span>
+          <div class="ocr-inline">
+            <input type="file" id="image-upload-input" accept=".png,.jpg,.jpeg,.webp" class="file-input" />
+            <button type="button" id="analyze-image-btn" class="btn btn-outline btn-sm">Check Screenshot</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Error Notice -->
+    <section id="error-state" class="card error-card hidden" role="alert">
+      <strong id="error-title" class="error-title">Notice</strong>
+      <p id="error-message" class="error-message"></p>
+    </section>
+
+    <!-- Crisp Results on Main Screen -->
+    <section id="results-view" class="card results-card hidden" aria-live="polite">
+      <div class="result-top">
+        <div>
+          <span class="small-label">Verdict</span>
+          <h2 id="risk-headline" class="risk-headline">Caution</h2>
+        </div>
+        <span id="risk-score-pill" class="score-pill">Rule Risk: 30/100</span>
+      </div>
+
+      <p id="risk-one-liner" class="one-liner"></p>
+
+      <div class="ml-strip">
+        <strong>AI Model Score:</strong> <span id="ml-score-text"></span>
+      </div>
+
+      <div id="flags-section" class="result-block">
+        <h3 class="block-title">Red Flags Found</h3>
+        <ul id="flags-list" class="flags-list"></ul>
+      </div>
+
+      <div class="result-block">
+        <h3 class="block-title">What You Should Do</h3>
+        <ul id="actions-list" class="actions-list"></ul>
+      </div>
+
+      <p class="tiny-note">
+        Automated check only — not 100% proof. Always verify the company yourself.
+      </p>
+    </section>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>

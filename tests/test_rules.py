@@ -194,6 +194,55 @@ class TestRiskRulesAndExplanations(unittest.TestCase):
         self.assertIn("Statistical ML Signal Only", triage_stat_only["label"])
         self.assertNotIn("High Risk", triage_stat_only["label"])
 
+        # Test None input resilience
+        triage_none = compute_experimental_triage_score(None, None)
+        self.assertFalse(triage_none["available"])
+        self.assertIsNone(triage_none["score"])
+
+    def test_currency_symbol_fee_detection(self) -> None:
+        """Verify currency symbols ($100, £50, €75) without prefix words match upfront fee rules."""
+        for snippet in (
+            "$100 for registration before interview",
+            "£50 for onboarding processing",
+            "€75 for training deposit",
+            "Rs. 500 for application fee",
+        ):
+            res = self.engine.evaluate(snippet)
+            rule_ids = [r["rule_id"] for r in res["triggered_rules"]]
+            self.assertIn(
+                "RULE_UPFRONT_FEE",
+                rule_ids,
+                f"Failed to detect upfront fee in: {snippet}",
+            )
+
+    def test_modern_payment_methods_detection(self) -> None:
+        """Verify modern wallet/payment schemes (UPI, GPay, Zelle, Venmo) trigger warning rules."""
+        for snippet in (
+            "Pay via Google Pay for fee to reserve your seat.",
+            "Send via UPI for onboarding deposit.",
+            "Transfer through Zelle for equipment payment before start date.",
+        ):
+            res = self.engine.evaluate(snippet)
+            self.assertGreaterEqual(
+                len(res["triggered_rules"]),
+                1,
+                f"Expected warning trigger for: {snippet}",
+            )
+
+    def test_portal_disclaimer_preserves_following_job_text_without_double_newlines(self) -> None:
+        """Verify disclaimer pattern only strips the disclaimer and does NOT wipe out single-newline text."""
+        text = (
+            "Beware of imposters!\n"
+            "Data Analytics Intern role.\n"
+            "Selected interns must pay a registration fee of $100 before receiving offer letter.\n"
+            "Contact recruiter on WhatsApp only."
+        )
+        res = self.engine.evaluate(text)
+        rule_ids = {r["rule_id"] for r in res["triggered_rules"]}
+        self.assertIn("RULE_UPFRONT_FEE", rule_ids)
+        self.assertIn("RULE_UNOFFICIAL_COMMUNICATION_CHANNEL", rule_ids)
+        self.assertEqual(res["rule_based_assessment"]["risk_level_code"], "high")
+
 
 if __name__ == "__main__":
     unittest.main()

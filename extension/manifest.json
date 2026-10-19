@@ -7,6 +7,10 @@
     "activeTab",
     "scripting"
   ],
+  "host_permissions": [
+    "http://127.0.0.1:5000/*",
+    "http://localhost:5000/*"
+  ],
   "action": {
     "default_title": "ScamShield AI — Job & Internship Risk Analyzer",
     "default_popup": "popup.html",

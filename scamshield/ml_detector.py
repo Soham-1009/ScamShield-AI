@@ -142,7 +142,8 @@ class MLDetector:
             }
 
         try:
-            raw_pred = self._pipeline.predict([text])[0]
+            input_text = "" if text is None else (text if isinstance(text, str) else str(text))
+            raw_pred = self._pipeline.predict([input_text])[0]
             predicted_label = int(raw_pred)
             predicted_class = (
                 "fraudulent_pattern_detected"

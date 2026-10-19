@@ -41,6 +41,37 @@ class UploadedFileStorage:
         return self._data
 
 
+class CaseInsensitiveHeaders(dict):
+    """Case-insensitive dictionary for HTTP headers, matching Werkzeug/Flask behaviour."""
+
+    def __init__(self, data: Optional[Dict[str, str]] = None) -> None:
+        super().__init__()
+        self._keys: Dict[str, str] = {}
+        if data:
+            for k, v in data.items():
+                self[k] = v
+
+    def __setitem__(self, key: str, value: str) -> None:
+        lower_k = key.lower()
+        self._keys[lower_k] = key
+        super().__setitem__(lower_k, value)
+
+    def __getitem__(self, key: str) -> str:
+        return super().__getitem__(key.lower())
+
+    def __contains__(self, key: object) -> bool:
+        return isinstance(key, str) and super().__contains__(key.lower())
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return super().get(key.lower(), default)
+
+    def items(self) -> Any:
+        return [(self._keys.get(k, k), v) for k, v in super().items()]
+
+    def keys(self) -> Any:
+        return [self._keys.get(k, k) for k in super().keys()]
+
+
 class RequestContext:
     """Thread-local HTTP request proxy."""
 
@@ -59,7 +90,7 @@ class RequestContext:
     ) -> None:
         self._local.method = method.upper()
         self._local.path = path
-        self._local.headers = {k: v for k, v in headers.items()}
+        self._local.headers = CaseInsensitiveHeaders(headers)
         self._local.body = body
         self._local.remote_addr = remote_addr
         self._local.files = files or {}

@@ -180,7 +180,11 @@ def create_app(
     rate_limiter = SlidingWindowRateLimiter(max_requests=rate_limit_per_minute)
 
     def _check_rate_limit() -> Optional[Any]:
-        client_ip = request.remote_addr or "127.0.0.1"
+        client_ip = (
+            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.remote_addr
+            or "127.0.0.1"
+        )
         allowed, retry_after = rate_limiter.is_allowed(client_ip)
         if not allowed:
             resp = make_response(
@@ -405,7 +409,8 @@ def create_app(
                 file_bytes=file_bytes,
                 max_bytes=max_image_bytes,
             )
-            source_url = validate_source_url(request.form.get("source_url"))
+            raw_url = request.form.get("source_url") or request.form.get("url")
+            source_url = validate_source_url(raw_url)
         except ValidationError as exc:
             return make_response(jsonify(exc.to_dict()), exc.status_code)
 

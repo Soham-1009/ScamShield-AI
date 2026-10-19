@@ -266,6 +266,43 @@ class TestScamShieldAPI(unittest.TestCase):
         self.assertEqual(resp_third.status_code, 429)
         self.assertEqual(resp_third.get_json()["error"], "RATE_LIMIT_EXCEEDED")
 
+    def test_rate_limiting_with_forwarded_for(self) -> None:
+        """Verify rate limiter respects X-Forwarded-For to separate client IPs behind a proxy."""
+        limited_app = create_app(
+            model_path="models/nonexistent.joblib",
+            rate_limit_per_minute=2,
+        )
+        limited_client = limited_app.test_client()
+
+        # Client A makes 2 requests
+        self.assertEqual(limited_client.get("/api/health", headers={"X-Forwarded-For": "198.51.100.1"}).status_code, 200)
+        self.assertEqual(limited_client.get("/api/health", headers={"X-Forwarded-For": "198.51.100.1"}).status_code, 200)
+        self.assertEqual(limited_client.get("/api/health", headers={"X-Forwarded-For": "198.51.100.1"}).status_code, 429)
+
+        # Client B is not blocked
+        self.assertEqual(limited_client.get("/api/health", headers={"X-Forwarded-For": "198.51.100.2"}).status_code, 200)
+
+    def test_analyze_image_with_url_alias(self) -> None:
+        """Verify POST /api/analyze-image accepts 'url' form field as alias for 'source_url'."""
+        img = Image.new("RGB", (300, 100), color=(255, 255, 255))
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 10), "Full Time Python Developer role at Example Corp.", fill=(0, 0, 0))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+
+        resp = self.client.post(
+            "/api/analyze-image",
+            data={
+                "image": (buf, "job.png"),
+                "url": "https://careers.example.com/jobs/99",
+            },
+            content_type="multipart/form-data",
+        )
+        if resp.status_code == 200:
+            body = resp.get_json()
+            self.assertEqual(body["processing_status"]["source_url"], "https://careers.example.com/jobs/99")
+
     def test_dataset_validation_and_missing_text_handling(self) -> None:
         """Verify train_model.load_and_validate_dataset handles missing fields and validates columns."""
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -109,6 +109,27 @@ class TestValidation(unittest.TestCase):
         validated_img = validate_uploaded_image("offer.png", buf.getvalue())
         self.assertEqual(validated_img.size, (120, 60))
 
+    def test_source_url_rejects_control_characters_and_newlines(self) -> None:
+        """Verify URL validation rejects CRLF injection and control characters."""
+        for malformed in (
+            "https://careers.example.com/job\r\nInjected: True",
+            "https://careers.example.com/job\nBad",
+            "https://careers.example.com/job\x00evil",
+        ):
+            with self.assertRaises(ValidationError) as ctx:
+                validate_source_url(malformed)
+            self.assertEqual(ctx.exception.error_code, "INVALID_URL_FORMAT")
+
+    def test_image_excessive_dimensions_rejected(self) -> None:
+        """Verify images with extreme dimensions are rejected before full decompression."""
+        # Create a small valid PNG with dimensions claiming 6000x5000 = 30M pixels
+        buf = io.BytesIO()
+        img = Image.new("RGB", (6000, 5000), color=(255, 255, 255))
+        img.save(buf, format="PNG")
+        with self.assertRaises(ValidationError) as ctx:
+            validate_uploaded_image("huge.png", buf.getvalue())
+        self.assertEqual(ctx.exception.error_code, "INVALID_IMAGE_DIMENSIONS")
+
 
 if __name__ == "__main__":
     unittest.main()

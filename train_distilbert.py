@@ -331,9 +331,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_COMPARISON_OUTPUT,
         help=f"Path to save JSON comparison report (default: {DEFAULT_COMPARISON_OUTPUT}).",
     )
+    parser.add_argument(
+        "--pretrained-model-name",
+        type=str,
+        default="distilbert-base-uncased",
+        help="Pretrained Hugging Face model identifier (default: distilbert-base-uncased).",
+    )
     parser.add_argument("--epochs", type=int, default=2, help="Number of training epochs (default: 2).")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size (default: 16).")
     parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate (default: 2e-5).")
+    parser.add_argument("--max-length", type=int, default=256, help="Maximum sequence token length (default: 256).")
+    parser.add_argument("--random-state", type=int, default=42, help="Random seed (default: 42).")
     return parser.parse_args(argv)
 
 
@@ -344,9 +352,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             csv_path=Path(args.data_path),
             output_dir=Path(args.output_dir),
             comparison_report_path=Path(args.report_path),
+            pretrained_model_name=args.pretrained_model_name,
             epochs=args.epochs,
             batch_size=args.batch_size,
             learning_rate=args.lr,
+            max_length=args.max_length,
+            random_state=args.random_state,
         )
     except FileNotFoundError:
         return 2

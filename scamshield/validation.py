@@ -145,6 +145,13 @@ def validate_source_url(url: Any, max_length: int = DEFAULT_MAX_URL_LENGTH) -> O
     if not cleaned_url:
         return None
 
+    if "\r" in cleaned_url or "\n" in cleaned_url or CONTROL_CHAR_PATTERN.search(cleaned_url):
+        raise ValidationError(
+            "Field 'source_url' must not contain line breaks or non-printable control characters.",
+            status_code=400,
+            error_code="INVALID_URL_FORMAT",
+        )
+
     if len(cleaned_url) > max_length:
         raise ValidationError(
             f"Field 'source_url' exceeds the maximum allowed length of {max_length} characters.",
@@ -262,32 +269,36 @@ def validate_uploaded_image(
         with Image.open(verify_stream) as img_verify:
             img_verify.verify()
 
-        # Second pass: re-open for actual pixel access
+        # Second pass: re-open header and inspect format/dimensions BEFORE decompressing pixels
         load_stream = io.BytesIO(file_bytes)
         image = Image.open(load_stream)
+
+        img_format = (image.format or "").upper()
+        if img_format not in ALLOWED_IMAGE_FORMATS:
+            raise ValidationError(
+                f"Unsupported image format '{img_format or 'UNKNOWN'}'. Please upload PNG, JPEG, WEBP, BMP, or TIFF.",
+                status_code=400,
+                error_code="UNSUPPORTED_IMAGE_FORMAT",
+            )
+
+        # Guard against decompression bomb / extreme dimensions before allocating pixel buffer
+        width, height = image.size
+        if width <= 0 or height <= 0 or (width * height) > 25_000_000:
+            raise ValidationError(
+                f"Image dimensions ({width}x{height}) are invalid or exceed safe processing limits.",
+                status_code=400,
+                error_code="INVALID_IMAGE_DIMENSIONS",
+            )
+
+        # Decompress pixels only after format and dimensions are verified safe
         image.load()
+    except ValidationError:
+        raise
     except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as exc:
         raise ValidationError(
             "The uploaded file could not be read as a valid image. Please upload a clear PNG, JPG, or WEBP screenshot.",
             status_code=400,
             error_code="UNREADABLE_IMAGE",
         ) from exc
-
-    img_format = (image.format or "").upper()
-    if img_format not in ALLOWED_IMAGE_FORMATS:
-        raise ValidationError(
-            f"Unsupported image format '{img_format or 'UNKNOWN'}'. Please upload PNG, JPEG, WEBP, BMP, or TIFF.",
-            status_code=400,
-            error_code="UNSUPPORTED_IMAGE_FORMAT",
-        )
-
-    # Guard against decompression bomb / extreme dimensions
-    width, height = image.size
-    if width <= 0 or height <= 0 or (width * height) > 25_000_000:
-        raise ValidationError(
-            f"Image dimensions ({width}x{height}) are invalid or exceed safe processing limits.",
-            status_code=400,
-            error_code="INVALID_IMAGE_DIMENSIONS",
-        )
 
     return image

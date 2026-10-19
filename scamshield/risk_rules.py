@@ -24,10 +24,10 @@ from typing import Any, Dict, List, Optional, Pattern, Sequence
 # Strips standard job-portal anti-scam safety footers (e.g., Naukri.com's "Beware of imposters!" banner)
 # so platform warning banners are not mistaken for employer fee demands.
 PORTAL_SAFETY_DISCLAIMER_PATTERN = re.compile(
-    r"(?:beware\s+of\s+imposters!.*?(?:read\s+more|\n\n|$)|"
+    r"(?:beware\s+of\s+imposters!(?:[^\n]*read\s+more|[^\n]*)|"
     r"(?:\b(?:naukri\.com|internshala|indeed|linkedin|monster|foundit)\b|\bfraudsters\s+may\s+ask\b)"
     r"[^\n.]*?(?:registration\s+fee|refundable\s+fee|in\s+exchange\s+of\s+money)[^\n.]*\.?)",
-    re.IGNORECASE | re.DOTALL,
+    re.IGNORECASE,
 )
 
 
@@ -63,7 +63,8 @@ DEFAULT_RISK_RULES: List[RiskRule] = [
             r"\b(?:refundable|one[-\s]?time|nominal|mandatory)\s+(?:security\s+)?(?:deposit|fee|charge|payment)\b",
             r"\bpay\s+(?:a\s+)?(?:small\s+|nominal\s+|refundable\s+)?(?:fee|deposit|amount|charge)\b",
             r"\b(?:fee|deposit|payment)\s+of\s+(?:rs\.?|inr|\$|usd|£|€)\s*\d[\d,]*(?:\.\d+)?\b",
-            r"\b(?:rs\.?|inr|\$|usd|£|€)\s*\d[\d,]*(?:\.\d+)?\s+(?:for\s+|as\s+)?(?:registration|training|onboarding|security\s+deposit|processing|application\s+fee|laptop\s+deposit)\b",
+            r"(?:(?:\b(?:rs\.?|inr|usd)\b)|[\$£€])\s*\d[\d,]*(?:\.\d+)?\s+(?:for\s+|as\s+)?(?:registration|training|onboarding|security\s+deposit|processing|application\s+fee|laptop\s+deposit)\b",
+            r"\b(?:pay\s+via\s+|send\s+via\s+)?(?:upi|gpay|google\s+pay|phonepe|paytm|zelle|venmo|cash\s*app)\s+(?:for\s+|to\s+pay\s+)?(?:fee|charges?|deposit|onboarding)\b",
         ],
         explanation=(
             "The listing references an upfront fee, deposit, or mandatory payment for registration, "
@@ -85,7 +86,7 @@ DEFAULT_RISK_RULES: List[RiskRule] = [
         patterns=[
             r"\b(?:laptop|equipment|software|hardware|macbook|workstation|starter\s+kit)\s+(?:security\s+)?(?:deposit|fee|shipping\s+fee|advance\s+payment)\b",
             r"\b(?:we\s+will\s+send\s+you\s+a\s+check|deposit\s+the\s+check|purchase\s+equipment\s+from\s+our\s+(?:approved\s+)?vendor)\b",
-            r"\b(?:wire\s+transfer|crypto(?:currency)?|bitcoin|usdt|gift\s+card|itunes\s+card|steam\s+card|western\s+union)\s+(?:for\s+equipment|payment|to\s+complete\s+onboarding|to\s+our\s+vendor)\b",
+            r"\b(?:wire\s+transfer|crypto(?:currency)?|bitcoin|usdt|gift\s+card|itunes\s+card|steam\s+card|western\s+union|zelle|venmo|cash\s*app|paytm|phonepe|gpay|google\s+pay)\s+(?:for\s+equipment|payment|to\s+complete\s+onboarding|to\s+our\s+vendor)\b",
         ],
         explanation=(
             "The offer mentions paying for company equipment, purchasing supplies from a designated "
@@ -108,7 +109,7 @@ DEFAULT_RISK_RULES: List[RiskRule] = [
         weight=55,
         patterns=[
             r"\b(?:bank\s+account\s+(?:login|password|credentials|details|number)|online\s+banking\s+(?:login|password|id)|credit\s+card\s+(?:number|details|cvv)|debit\s+card\s+(?:number|pin|cvv)|upi\s+pin|atm\s+pin|one[-\s]?time\s+password|share\s+your\s+otp)\b",
-            r"\b(?:provide|send|submit|share|email)\s+(?:your\s+)?(?:bank\s+account|routing\s+number|credit\s+card|debit\s+card|bank\s+statement)\s+(?:before\s+interview|to\s+apply|with\s+your\s+application|immediately)\b",
+            r"\b(?:provide|send|submit|share|email)\s+(?:your\s+)?(?:bank\s+account|bank\s+details|routing\s+number|credit\s+card|debit\s+card|bank\s+statement)\s+(?:before\s+interview|to\s+apply|with\s+your\s+application|immediately)\b",
             r"\b(?:use\s+your\s+personal\s+bank\s+account|receive\s+and\s+transfer\s+funds|process\s+client\s+payments\s+through\s+your\s+account)\b",
         ],
         explanation=(
@@ -244,7 +245,7 @@ DEFAULT_RISK_RULES: List[RiskRule] = [
         weight=30,
         patterns=[
             r"\b(?:contact|message|ping|reach\s+out|apply|interview|connect|send\s+your\s+resume|dm)\s+(?:us\s+|me\s+|hr\s+|the\s+hiring\s+manager\s+)?(?:only\s+)?(?:on|via|through)\s+(?:whatsapp|telegram|signal|wechat|viber|google\s+hangouts)\b",
-            r"\b(?:whatsapp|telegram)\s+(?:only|number|hr|recruiter|interview|chat)\s*(?:at|on|:)?\s*(?:\+?\d[\d\s-]{7,15}|@[a-zA-Z0-9_]{4,}|t\.me/[a-zA-Z0-9_]+)?\b",
+            r"\b(?:whatsapp|telegram)\s+(?:only|number|hr|recruiter|interview|chat|your\s+resume|your\s+cv|your\s+details)\s*(?:at|on|:)?\s*(?:\+?\d[\d\s-]{7,15}|@[a-zA-Z0-9_]{4,}|t\.me/[a-zA-Z0-9_]+)?\b",
             r"\bt\.me/[a-zA-Z0-9_]+\b",
             r"\b(?:text[-\s]?only\s+interview|interview\s+via\s+(?:telegram|whatsapp|text\s+chat))\b",
         ],
@@ -386,6 +387,11 @@ def compute_experimental_triage_score(
     """
     Compute a clearly documented experimental combined triage score.
     """
+    if not isinstance(rule_assessment, dict):
+        rule_assessment = {}
+    if not isinstance(ml_result, dict):
+        ml_result = {}
+
     rule_score = float(rule_assessment.get("rule_score", 0))
     triggered_count = int(rule_assessment.get("triggered_rule_count", 0))
     ml_available = bool(ml_result.get("available", False))

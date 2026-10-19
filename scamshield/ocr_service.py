@@ -50,6 +50,16 @@ class OCRError(Exception):
         }
 
 
+STANDARD_TESSERACT_PATHS = [
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+    "/usr/bin/tesseract",
+    "/usr/local/bin/tesseract",
+    "/opt/homebrew/bin/tesseract",
+]
+
+
 class OCRService:
     """
     Wrapper around pytesseract for extracting text from job offer screenshots.
@@ -68,13 +78,24 @@ class OCRService:
                 error_code="PYTESSERACT_MISSING",
             ) from exc
 
-        if self.tesseract_cmd:
-            pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
+        cmd_to_check = self.tesseract_cmd or getattr(pytesseract.pytesseract, "tesseract_cmd", "tesseract")
+        resolved: Optional[str] = None
 
-        cmd_to_check = getattr(pytesseract.pytesseract, "tesseract_cmd", "tesseract")
-        resolved = shutil.which(cmd_to_check) or (
-            cmd_to_check if os.path.isfile(cmd_to_check) and os.access(cmd_to_check, os.X_OK) else None
-        )
+        if self.tesseract_cmd:
+            # If an explicit path was passed, check that specific path directly
+            if os.path.isfile(self.tesseract_cmd) and os.access(self.tesseract_cmd, os.X_OK):
+                resolved = self.tesseract_cmd
+            else:
+                resolved = shutil.which(self.tesseract_cmd)
+        else:
+            # Check default command via PATH, then check standard install locations
+            resolved = shutil.which(cmd_to_check)
+            if not resolved:
+                for candidate in STANDARD_TESSERACT_PATHS:
+                    if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                        resolved = candidate
+                        break
+
         if not resolved:
             raise OCRError(
                 TESSERACT_INSTALL_INSTRUCTIONS,
@@ -82,6 +103,7 @@ class OCRService:
                 error_code="TESSERACT_NOT_INSTALLED",
             )
 
+        pytesseract.pytesseract.tesseract_cmd = resolved
         return pytesseract
 
     def get_health_status(self) -> Dict[str, Any]:

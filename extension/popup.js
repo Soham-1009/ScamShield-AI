@@ -15,7 +15,7 @@
   const STOP_SET = new Set(ML_MODEL.stop);
 
   const PORTAL_DISCLAIMER_REGEX =
-    /(?:beware\s+of\s+imposters![\s\S]*?(?:read\s+more|\n\n|$)|(?:\b(?:naukri\.com|internshala|indeed|linkedin|foundit)\b|\bfraudsters\s+may\s+ask\b)[^\n.]*?(?:registration\s+fee|refundable\s+fee|in\s+exchange\s+of\s+money)[^\n.]*\.?)/gi;
+    /(?:beware\s+of\s+imposters!(?:[^\n]*read\s+more|[^\n]*)|(?:\b(?:naukri\.com|internshala|indeed|linkedin|foundit)\b|\bfraudsters\s+may\s+ask\b)[^\n.]*?(?:registration\s+fee|refundable\s+fee|in\s+exchange\s+of\s+money)[^\n.]*\.?)/gi;
 
   const LOCAL_RULES = [
     {
@@ -26,7 +26,9 @@
         /\b(?:registration|onboarding|application|processing|training|certification|exam|security|verification|background\s+check|documentation|id\s+card|joining|administrative)\s+(?:fee|fees|charge|charges|deposit|payment|cost)\b/gi,
         /\b(?:refundable|one[-\s]?time|nominal|mandatory)\s+(?:security\s+)?(?:deposit|fee|charge|payment)\b/gi,
         /\bpay\s+(?:a\s+)?(?:small\s+|nominal\s+|refundable\s+)?(?:fee|deposit|amount|charge)\b/gi,
-        /\b(?:fee|deposit|payment)\s+of\s+(?:rs\.?|inr|\$|usd|£|€)\s*\d[\d,]*(?:\.\d+)?\b/gi
+        /\b(?:fee|deposit|payment)\s+of\s+(?:rs\.?|inr|\$|usd|£|€)\s*\d[\d,]*(?:\.\d+)?\b/gi,
+        /(?:(?:\b(?:rs\.?|inr|usd)\b)|[\$£€])\s*\d[\d,]*(?:\.\d+)?\s+(?:for\s+|as\s+)?(?:registration|training|onboarding|security\s+deposit|processing|application\s+fee|laptop\s+deposit)\b/gi,
+        /\b(?:pay\s+via\s+|send\s+via\s+)?(?:upi|gpay|google\s+pay|phonepe|paytm|zelle|venmo|cash\s*app)\s+(?:for\s+|to\s+pay\s+)?(?:fee|charges?|deposit|onboarding)\b/gi
       ],
       reason: "Asks you to pay money (registration, training, or security fee). Real companies pay you — they do not charge you to join.",
       action: "Never pay any fee or deposit for a job or internship, even if they call it refundable."
@@ -36,8 +38,9 @@
       severity: "high",
       weight: 50,
       patterns: [
-        /\b(?:laptop|equipment|software|hardware|macbook|starter\s+kit)\s+(?:security\s+)?(?:deposit|fee|shipping\s+fee|advance\s+payment)\b/gi,
-        /\b(?:we\s+will\s+send\s+you\s+a\s+check|deposit\s+the\s+check|purchase\s+equipment\s+from\s+our\s+(?:approved\s+)?vendor)\b/gi
+        /\b(?:laptop|equipment|software|hardware|macbook|workstation|starter\s+kit)\s+(?:security\s+)?(?:deposit|fee|shipping\s+fee|advance\s+payment)\b/gi,
+        /\b(?:we\s+will\s+send\s+you\s+a\s+check|deposit\s+the\s+check|purchase\s+equipment\s+from\s+our\s+(?:approved\s+)?vendor)\b/gi,
+        /\b(?:wire\s+transfer|crypto(?:currency)?|bitcoin|usdt|gift\s+card|itunes\s+card|steam\s+card|western\s+union|zelle|venmo|cash\s*app|paytm|phonepe|gpay|google\s+pay)\s+(?:for\s+equipment|payment|to\s+complete\s+onboarding|to\s+our\s+vendor)\b/gi
       ],
       reason: "Asks for a laptop/equipment fee or tells you to deposit a check to buy supplies.",
       action: "Do not pay for company laptops or cash checks sent by strangers."
@@ -48,6 +51,7 @@
       weight: 55,
       patterns: [
         /\b(?:bank\s+account\s+(?:login|password|credentials|details|number)|online\s+banking\s+(?:login|password|id)|credit\s+card\s+(?:number|details|cvv)|debit\s+card\s+(?:number|pin|cvv)|upi\s+pin|atm\s+pin|share\s+your\s+otp)\b/gi,
+        /\b(?:provide|send|submit|share|email)\s+(?:your\s+)?(?:bank\s+account|bank\s+details|routing\s+number|credit\s+card|debit\s+card|bank\s+statement)\s+(?:before\s+interview|to\s+apply|with\s+your\s+application|immediately)\b/gi,
         /\b(?:use\s+your\s+personal\s+bank\s+account|receive\s+and\s+transfer\s+funds)\b/gi
       ],
       reason: "Asks for private banking details, card numbers, PIN/OTP, or wants to move money through your bank account.",
@@ -102,7 +106,7 @@
       severity: "medium",
       weight: 30,
       patterns: [
-        /\b[\w.+-]+@(?:gmail|yahoo|outlook|hotmail|rediffmail|ymail)\.(?:com|in|co\.uk|net|org)\b/gi,
+        /\b[\w.+-]+@(?:gmail|yahoo|outlook|hotmail|aol|protonmail|rediffmail|ymail|icloud|mail)\.(?:com|in|co\.uk|net|org)\b/gi,
         /\b(?:company\s+name\s+(?:will\s+be\s+shared|disclosed)\s+after\s+(?:registration|payment|shortlisting)|undisclosed\s+employer)\b/gi,
         /\b(?:posted\s+by\s+freelancer|leading\s+management\s+consultant|india.?s\s+leading\s+mnc)\b/gi
       ],
@@ -114,9 +118,9 @@
       severity: "medium",
       weight: 30,
       patterns: [
-        /\b(?:contact|message|ping|reach\s+out|apply|interview|connect|send\s+your\s+resume|dm)\s+(?:us\s+|me\s+|hr\s+|the\s+hiring\s+manager\s+)?(?:only\s+)?(?:on|via|through)\s+(?:whatsapp|telegram|signal)\b/gi,
+        /\b(?:contact|message|ping|reach\s+out|apply|interview|connect|send\s+your\s+resume|dm)\s+(?:us\s+|me\s+|hr\s+|the\s+hiring\s+manager\s+)?(?:only\s+)?(?:on|via|through)\s+(?:whatsapp|telegram|signal|wechat|viber)\b/gi,
         /\bt\.me\/[a-zA-Z0-9_]+\b/gi,
-        /\b(?:whatsapp|telegram)\s+(?:only|number|hr|recruiter|interview)\b/gi
+        /\b(?:whatsapp|telegram)\s+(?:only|number|hr|recruiter|interview|chat|your\s+resume|your\s+cv|your\s+details)\b/gi
       ],
       reason: "Asks you to interview or apply only through WhatsApp or Telegram instead of official company email.",
       action: "Ask the recruiter to email you from their official company domain."
@@ -146,11 +150,13 @@
     }
 
     const norm = Math.sqrt(normSq);
+    if (norm === 0) {
+      return 0;
+    }
+
     let z = ML_MODEL.intercept;
-    if (norm > 0) {
-      for (const tok of Object.keys(tfidf)) {
-        z += (tfidf[tok] / norm) * ML_MODEL.coef[tok];
-      }
+    for (const tok of Object.keys(tfidf)) {
+      z += (tfidf[tok] / norm) * ML_MODEL.coef[tok];
     }
 
     const prob = 1.0 / (1.0 + Math.exp(-Math.max(-30, Math.min(30, z))));
@@ -305,10 +311,12 @@
     });
   }
 
-  async function scanAndCheckCurrentPage() {
+  async function scanAndCheckCurrentPage(isAuto = false) {
     hideError();
     if (typeof chrome === "undefined" || !chrome.tabs || !chrome.scripting) {
-      showError("Paste Text Above", "Tab scanning is only available inside the Chrome extension.");
+      if (!isAuto) {
+        showError("Paste Text Above", "Tab scanning is only available inside the Chrome extension.");
+      }
       return;
     }
 
@@ -325,17 +333,34 @@
         tabUrl.startsWith("chrome-extension://") ||
         tabUrl.includes("chromewebstore.google.com")
       ) {
-        showError(
-          "Switch to a Job Tab",
-          "Chrome blocks scanning on chrome:// settings pages. Switch to your job listing tab (like Naukri or LinkedIn) or paste text above."
-        );
+        if (!isAuto) {
+          showError(
+            "Switch to a Job Tab",
+            "Chrome blocks scanning on chrome:// settings pages. Switch to your job listing tab (like Naukri or LinkedIn) or paste text above."
+          );
+        }
         return;
       }
 
       const injection = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: () => {
-          const selectors = ["main", "article", "[role='main']", ".job-description", "#job-description", "body"];
+          const selectors = [
+            "#jobDescriptionText",
+            ".jobs-description__content",
+            ".jobs-box__html-content",
+            ".jobsearch-JobComponent-description",
+            ".job-desc-container",
+            ".dang-inner-html",
+            ".internship_details",
+            ".job_details",
+            ".job-description",
+            "#job-description",
+            "article",
+            "main",
+            "[role='main']",
+            "body"
+          ];
           for (const sel of selectors) {
             const el = document.querySelector(sel);
             if (el && el.innerText && el.innerText.trim().length >= 60) {
@@ -348,14 +373,18 @@
 
       const extracted = injection && injection[0] && injection[0].result;
       if (!extracted || extracted.length < 10) {
-        showError("No Job Text Found", "Could not read text on this page. Paste the job description in the box above.");
+        if (!isAuto) {
+          showError("No Job Text Found", "Could not read text on this page. Paste the job description in the box above.");
+        }
         return;
       }
 
       jobTextInput.value = extracted;
       analyzeAndRender(extracted);
     } catch (_err) {
-      showError("Cannot Read This Page", "Copy and paste the job text into the box above.");
+      if (!isAuto) {
+        showError("Cannot Read This Page", "Copy and paste the job text into the box above.");
+      }
     }
   }
 
@@ -389,7 +418,7 @@
     }
   }
 
-  scanPageBtn.addEventListener("click", scanAndCheckCurrentPage);
+  scanPageBtn.addEventListener("click", () => scanAndCheckCurrentPage(false));
   analyzeBtn.addEventListener("click", () => analyzeAndRender(jobTextInput.value));
   clearTextBtn.addEventListener("click", () => {
     jobTextInput.value = "";
@@ -398,5 +427,5 @@
   });
   analyzeImageBtn.addEventListener("click", analyzeScreenshot);
 
-  scanAndCheckCurrentPage();
+  scanAndCheckCurrentPage(true);
 })();

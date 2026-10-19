@@ -272,10 +272,10 @@ def train_and_evaluate(
         stratify=y,
     )
 
-    # Stratified K-Fold cross-validation on X_train to select regularized C
+    # Stratified K-Fold cross-validation on X_train to select regularized C with optimal probability calibration
     n_splits = min(5, min(y_train.count(0), y_train.count(1)))
-    best_c = c_candidates[-1]
-    best_cv_score = -1.0
+    best_c = 0.5
+    best_cv_loss = float("inf")
     cv_diagnostics: Dict[str, Any] = {}
 
     if n_splits >= 2:
@@ -306,19 +306,21 @@ def train_and_evaluate(
                     ),
                 ]
             )
-            scores = cross_val_score(candidate_pipe, X_train, y_train, cv=cv, scoring="f1")
-            mean_f1 = float(scores.mean())
-            std_f1 = float(scores.std())
+            scores_f1 = cross_val_score(candidate_pipe, X_train, y_train, cv=cv, scoring="f1")
+            scores_loss = -cross_val_score(
+                candidate_pipe, X_train, y_train, cv=cv, scoring="neg_log_loss"
+            )
+            mean_f1 = float(scores_f1.mean())
+            std_f1 = float(scores_f1.std())
+            mean_loss = float(scores_loss.mean())
             cv_diagnostics[f"C_{c_val}"] = {
                 "mean_f1": round(mean_f1, 4),
                 "std_f1": round(std_f1, 4),
+                "mean_log_loss": round(mean_loss, 4),
             }
-            # Prefer smaller C (stronger regularization) if scores are tied
-            if mean_f1 > best_cv_score + 0.005:
-                best_cv_score = mean_f1
-                best_c = c_val
-            elif abs(mean_f1 - best_cv_score) <= 0.005 and best_c == c_candidates[-1]:
-                # Tie-break in favor of stronger regularization
+            # Select candidate that minimizes log-loss while maintaining top F1
+            if mean_f1 >= 0.90 and mean_loss < best_cv_loss:
+                best_cv_loss = mean_loss
                 best_c = c_val
     else:
         best_c = 0.5

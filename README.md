@@ -1,43 +1,55 @@
 # ScamShield AI — Explainable Fake Job & Internship Detector
 
-ScamShield AI is a full-stack prototype and Manifest V3 Chrome Extension designed to help students and fresh graduates evaluate suspicious job advertisements and internship offers. It combines a **transparent, modular rule-based risk engine**, an **explainable deterministic template service**, **Tesseract OCR screenshot extraction**, and a **Scikit-learn TF-IDF + Logistic Regression classifier** (with an optional DistilBERT sequence classifier upgrade).
+ScamShield AI is an open-source, full-stack prototype and Manifest V3 Chrome Extension designed to protect students, job seekers, and fresh graduates from employment scams, predatory training fees, fake check fraud, and identity theft.
 
-> **Important Epistemic & Safety Principle:** ScamShield AI never claims a job or internship offer is definitively fraudulent or guaranteed legitimate based solely on a machine learning score or pattern match. Rule-based warning evidence and statistical ML predictions are displayed separately, and every assessment provides actionable verification steps. No generative AI or LLM APIs (such as Gemini, OpenAI, or Ollama) are used anywhere in the system.
+It combines a **transparent, modular rule-based risk engine**, an **explainable deterministic template explanation service**, **Tesseract OCR screenshot extraction**, and a **regularized Scikit-learn TF-IDF + Logistic Regression classifier** (with an optional DistilBERT sequence classifier upgrade).
+
+> [!IMPORTANT]
+> **Core Epistemic & Safety Principle:** ScamShield AI never claims a job or internship offer is definitively fraudulent or guaranteed legitimate based solely on a machine learning score or pattern match. Rule-based warning evidence and statistical ML predictions are displayed separately, and every assessment provides actionable verification steps. **Zero generative AI or LLM APIs (such as Gemini, OpenAI, or Ollama) are used anywhere in the system.**
 
 ---
 
 ## 1. Architecture & Key Features
 
-- **Transparent Rule-Based Risk Engine (`scamshield/risk_rules.py`)**
-  - Detects warning patterns across six core recruitment risk categories:
-    1. Upfront registration, training, equipment, or security fees
-    2. Requests for bank login credentials, payment card details, or premature identity documents
-    3. Unrealistic salary promises and guaranteed placement without interviews
-    4. Excessive urgency or countdown pressure to accept/pay immediately
-    5. Missing or unverifiable employer information (including personal webmail recruiter addresses)
-    6. Requests to communicate or interview exclusively via unofficial channels (WhatsApp, Telegram, Signal)
-  - Extracts the **exact verbatim phrases** that triggered each rule and pairs them with a clear explanation and a concrete verification step.
-  - Never labels an offer `"High Risk"` without explicit rule-based evidence, and never labels an offer `"Legitimate"` simply because zero configured rules triggered.
+### Transparent Rule-Based Risk Engine (`scamshield/risk_rules.py`)
+- Analyzes job postings across six core recruitment threat vectors:
+  1. **Upfront Fees:** Mandatory registration, training, certification, background check, or equipment deposits (supports `$`, `£`, `€`, `₹`/`Rs.`, UPI, GPay, PhonePe, Paytm, Zelle, Venmo, CashApp).
+  2. **Credential & Identity Theft:** Requests for bank account logins, payment card CVV/PIN, ATM credentials, or scans of Aadhaar, PAN, SSN, or passport before an interview.
+  3. **Unrealistic Promises:** Inflated daily/weekly earnings for simple tasks (e.g. `$800/day` for copy-paste typing) and guaranteed job placements without interviews.
+  4. **Urgency & Rush Pressure:** Countdown tactics (`"only 2 slots left"`, `"confirm within 24 hours or lose offer"`).
+  5. **Hidden / Personal Contact Details:** Anonymous employers (`"leading MNC"`, `"undisclosed client"`) and free webmail addresses (`@gmail.com`, `@yahoo.com`).
+  6. **Unofficial Communication Channels:** Insisting on interviewing or communicating exclusively via WhatsApp or Telegram.
+- **Smart Portal Disclaimer Stripping:** Automatically removes safety disclaimers inserted by recruitment portals (Naukri, Internshala, Indeed, LinkedIn, Foundit) so portal warnings are not mistaken for scam text.
+- **Verbatim Evidence Extraction:** Extracts the exact matching phrases from the listing, paired with human-readable rationale and actionable next steps.
 
-- **Deterministic Explanation Service (`scamshield/explanation_service.py`)**
-  - Generates structured JSON explanations using predefined templates and matched evidence—100% free of LLM dependencies or hallucinated company verifications.
-  - Strictly separates **explicit matched evidence** from **general contextual indicators**.
+### Deterministic Explanation Service (`scamshield/explanation_service.py`)
+- Builds structured explanations using predefined, deterministic templates.
+- Guarantees zero hallucinations, consistent wording, and immediate latency.
+- Clearly separates **explicit matched evidence** from **contextual indicators**.
 
-- **Machine Learning Classification Pipeline (`train_model.py` & `scamshield/ml_detector.py`)**
-  - Trains a CPU-friendly `Pipeline(TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True), LogisticRegression(class_weight="balanced"))` on the public Fake Job Postings dataset.
-  - Uses a stratified train/test split and fits the TF-IDF vectorizer strictly on the training split to prevent data leakage.
-  - Evaluates fraud-class precision, recall, F1-score, confusion matrix, and average precision (PR-AUC), saving the model to `models/fake_job_model.joblib` and metadata to `models/model_metadata.json`.
-  - If no trained model artifact is present, the backend and extension explicitly report that ML predictions are unavailable rather than displaying a fabricated `0/100` score.
+### Regularized Machine Learning Classifier (`train_model.py` & `scamshield/ml_detector.py`)
+- **Pipeline:** `Pipeline(TfidfVectorizer(max_features=5000, ngram_range=(1, 2), sublinear_tf=True), LogisticRegression(C=1.0, class_weight="balanced"))`.
+- **Anti-Overfitting & Data Leakage Prevention:**
+  - Sanitizes template noise tokens (e.g. `(Batch X)` tags) and deduplicates text records prior to splitting.
+  - Stratified 80/20 train/test split applied **before** TF-IDF vectorizer fitting.
+  - 5-Fold Stratified Cross-Validation on the training split evaluates both F1-score and cross-validated log-loss to ensure well-calibrated, non-extreme probabilities.
+  - Automatically calculates and logs the **generalization gap** (`train_f1 - test_f1`) in `models/model_metadata.json`.
+- **Offline Extension Weight Synchronization:**
+  - `train_model.py` automatically extracts vocabulary, IDF values, regression coefficients, and intercept directly into `extension/popup.js`.
+  - When model files are missing, the system explicitly reports `available: false` rather than fabricating predictions.
 
-- **Optional DistilBERT Sequence Classifier (`train_distilbert.py`)**
-  - Fine-tunes `distilbert-base-uncased` with class-weighted cross-entropy loss using a train/validation/test split and compares its held-out test metrics directly against the TF-IDF + Logistic Regression baseline on the same test set.
+### Tesseract OCR Screenshot Analysis (`scamshield/ocr_service.py`)
+- Extracts text from uploaded screenshot images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tiff`, max 5 MB).
+- Automatic discovery of Tesseract executables across standard Windows paths (`C:\Program Files\Tesseract-OCR\tesseract.exe`, `C:\Program Files (x86)\Tesseract-OCR\tesseract.exe`, `LOCALAPPDATA\Programs\Tesseract-OCR\tesseract.exe`) or via custom `TESSERACT_CMD`.
+- Decompression bomb safety guard (`MAX_IMAGE_PIXELS = 25_000_000`).
+- Image preprocessing (grayscale, Otsu thresholding, contrast enhancement) for reliable extraction from chat app screenshots and email offer letters.
 
-- **Tesseract OCR Screenshot Analysis (`scamshield/ocr_service.py`)**
-  - Extracts text from uploaded PNG, JPG, WEBP, BMP, or TIFF offer screenshots (`POST /api/analyze-image`) and passes the extracted text through the full analysis pipeline.
-
-- **Manifest V3 Chrome Extension (`extension/`)**
-  - Uses `activeTab` and `chrome.scripting.executeScript` only when the user clicks **Scan Current Page**, placing extracted text into the review box so the user controls what is submitted.
-  - Displays Rule-Based Assessment, Statistical ML Classifier, Matched Warning Evidence, Deterministic Explanation, and Recommended Verification Steps in distinct sections.
+### Manifest V3 Chrome Extension (`extension/`)
+- **Single-Screen UI:** All primary actions (Scan Current Page, Job Text Review Box, Check Pasted Text, and Screenshot Check) are directly visible on the main screen without hidden dropdowns.
+- **Dual-Mode Inference:**
+  - **In-Browser Local Engine (Default):** Runs the complete rule-based risk checks and the regularized TF-IDF + Logistic Regression model 100% locally in Chrome. Works offline with zero network latency and zero CORS configuration.
+  - **Backend API Mode (Optional):** Can connect to the local Flask backend (`http://127.0.0.1:5000`) or a deployed Google Cloud Run instance for full OCR and server-side analysis.
+- **Security & Privacy:** Uses `activeTab` and `chrome.scripting.executeScript` only on user click. Text is loaded into the editable box for review before analysis.
 
 ---
 
@@ -45,50 +57,48 @@ ScamShield AI is a full-stack prototype and Manifest V3 Chrome Extension designe
 
 ```text
 ScamShieldAI/
-├── app.py
-├── train_model.py
-├── train_distilbert.py
-├── requirements.txt
-├── .env.example
-├── .gitignore
-├── README.md
-├── data/
-│   └── .gitkeep
-├── models/
-│   └── .gitkeep
-├── scamshield/
+├── app.py                      # Flask REST API server & rate limiting
+├── train_model.py              # ML training, CV hyperparameter tuning, & extension sync
+├── train_distilbert.py         # Optional DistilBERT transformer training & evaluation
+├── requirements.txt            # Python dependencies (Flask, scikit-learn, pytesseract, etc.)
+├── .env.example                # Environment variable configuration template
+├── .gitignore                  # Git ignore rules (virtual environments, caches, datasets)
+├── README.md                   # Complete system documentation
+├── data/                       # Dataset directory (contains data/.gitkeep)
+│   └── fake_job_postings.csv   # Training dataset (120 unique balanced listings)
+├── models/                     # Model artifacts (contains models/.gitkeep)
+│   ├── fake_job_model.joblib   # Fitted Scikit-learn TF-IDF + LogReg pipeline
+│   └── model_metadata.json     # Training metrics, CV scores, & generalization diagnostics
+├── scamshield/                 # Core business logic package
+│   ├── __init__.py             # Application factory & route registration
+│   ├── _wsgi_fallback.py       # WSGI entrypoint for production servers (gunicorn)
+│   ├── ml_detector.py          # ML model loader & inference wrapper
+│   ├── risk_rules.py           # 6-category regex risk rules & weight calculations
+│   ├── explanation_service.py  # Deterministic templated explanation generator
+│   ├── ocr_service.py          # Tesseract OCR extraction & preprocessing
+│   └── validation.py           # Request validation, URL sanitization, & image guards
+├── extension/                  # Manifest V3 Chrome Extension
+│   ├── manifest.json           # Extension manifest (MV3, activeTab, scripting, host_permissions)
+│   ├── popup.html              # Main extension UI layout
+│   ├── popup.css               # Clean styling & risk level indicators
+│   ├── popup.js                # In-browser rule engine, ML inference, & backend client
+│   └── icons/                  # Extension icons (16px, 48px, 128px)
+├── tests/                      # Automated test suite (31 tests)
 │   ├── __init__.py
-│   ├── _wsgi_fallback.py
-│   ├── ml_detector.py
-│   ├── risk_rules.py
-│   ├── explanation_service.py
-│   ├── ocr_service.py
-│   └── validation.py
-├── extension/
-│   ├── manifest.json
-│   ├── popup.html
-│   ├── popup.css
-│   ├── popup.js
-│   └── icons/
-│       ├── icon16.png
-│       ├── icon48.png
-│       └── icon128.png
-├── tests/
-│   ├── __init__.py
-│   ├── test_rules.py
-│   ├── test_api.py
-│   └── test_validation.py
-└── deployment/
-    └── Dockerfile
+│   ├── test_rules.py           # Rule engine unit tests & disclaimer preservation
+│   ├── test_api.py             # Flask API endpoints, OCR, & rate limit tests
+│   └── test_validation.py      # Input validation & image boundary tests
+└── deployment/                 # Deployment configurations
+    └── Dockerfile              # Container definition for Google Cloud Run
 ```
 
 ---
 
 ## 3. Windows PowerShell Setup & Execution Guide
 
-Run the following exact commands in **Windows PowerShell** from the project root directory (`ScamShieldAI`).
+Follow these step-by-step instructions in **Windows PowerShell** from the project root (`c:\Users\soham\Desktop\Soham\ScamShieldAI`).
 
-### Step 1: Create a Virtual Environment & Install Python Dependencies
+### Step 1: Create Virtual Environment & Install Dependencies
 
 ```powershell
 python -m venv .venv
@@ -98,46 +108,44 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-### Step 2: Install Tesseract OCR (Required for Screenshot Analysis)
+### Step 2: Install Tesseract OCR (For Screenshot Analysis)
 
 ```powershell
-# Install Tesseract OCR via Windows Package Manager (winget)
+# Install via Windows Package Manager (winget)
 winget install --id UB-Mannheim.TesseractOCR
 
-# Verify Tesseract is on your PATH (or set TESSERACT_CMD in .env)
-$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
-& $env:TESSERACT_CMD --version
+# ScamShield AI automatically discovers Tesseract at:
+# C:\Program Files\Tesseract-OCR\tesseract.exe
+# If installed in a non-standard location, set TESSERACT_CMD in your .env:
+# TESSERACT_CMD=C:\custom\path\to\tesseract.exe
 ```
 
-### Step 3: Configure the Dataset & Train the Baseline ML Model
+### Step 3: Train the Machine Learning Classifier
 
-Download the public Fake Job Postings CSV dataset (containing columns `title`, `company_profile`, `description`, `requirements`, `benefits`, and binary target `fraudulent` in `{0, 1}`) and place it at `data\fake_job_postings.csv`:
+To train or retrain the baseline model and synchronize the weights with the Chrome extension:
 
 ```powershell
-# Place your dataset at data\fake_job_postings.csv, then run:
 python train_model.py --data-path data\fake_job_postings.csv --model-path models\fake_job_model.joblib --metadata-path models\model_metadata.json
 ```
 
-*Note:* If `data\fake_job_postings.csv` is not present, `train_model.py` prints setup instructions and exits cleanly without generating a fake model. The Flask backend and Chrome extension will still run in rule-based + OCR mode and clearly state that the ML model is not loaded.
+Output highlights:
+- Evaluates 5-fold Stratified Cross-Validation on the training split.
+- Automatically selects the optimal regularized $C$ parameter.
+- Evaluates held-out test precision, recall, F1, and PR-AUC.
+- Verifies generalization gap (`train_f1 - test_f1 = 0.0000`).
+- Synchronizes model weights directly to `extension/popup.js`.
 
-### Step 4 (Optional): Train & Compare the DistilBERT Sequence Classifier
-
-```powershell
-pip install torch transformers
-python train_distilbert.py --data-path data\fake_job_postings.csv --output-dir models\distilbert_fake_job --report-path models\distilbert_comparison.json --epochs 2
-```
-
-### Step 5: Run the Automated Test Suite
+### Step 4: Run the Automated Test Suite
 
 ```powershell
-# Run with pytest
+# Run with pytest (all 31 unit, OCR, and API tests)
 pytest -v
 
-# Or run with Python's built-in unittest runner
+# Or run with Python unittest
 python -m unittest discover -s tests -v
 ```
 
-### Step 6: Start the Flask Backend Server
+### Step 5: Start the Flask Backend Server
 
 ```powershell
 $env:SCAMSHIELD_HOST = "127.0.0.1"
@@ -145,64 +153,122 @@ $env:SCAMSHIELD_PORT = "5000"
 python app.py
 ```
 
-Verify the health endpoint in a second PowerShell terminal:
+Test the health check in a separate terminal:
 
 ```powershell
 Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/health" -Method Get | ConvertTo-Json -Depth 5
 ```
 
-### Step 7: Load the Chrome Extension in Google Chrome
+### Step 6: Load the Chrome Extension
 
 1. Open Google Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** using the toggle in the top-right corner.
-3. Click **Load unpacked** in the top-left action bar.
-4. Select the `extension` folder inside this project (`ScamShieldAI\extension`).
-5. Pin **ScamShield AI** to your Chrome toolbar, open any job listing page, click the extension icon, and use **Scan Current Page**, paste text, or upload a screenshot.
+2. Turn on **Developer mode** (toggle in the top-right corner).
+3. Click **Load unpacked** (top-left action bar).
+4. Select the `extension/` directory inside this project repository.
+5. Pin **ScamShield AI** to your Chrome toolbar.
+6. Open any job posting on LinkedIn, Indeed, Naukri, or Internshala, click the extension icon, and click **Scan Current Page** or paste text directly.
 
 ---
 
 ## 4. API Reference
 
 ### `GET /api/health`
-Returns service status, rule engine rule count, ML model availability, and Tesseract OCR status. Contains no LLM configuration.
+Returns service status, active rule count, ML model version and availability, and Tesseract OCR installation status.
 
-### `POST /api/analyze`
-Request body (`application/json`):
+**Sample Response:**
 ```json
 {
-  "job_text": "Data Entry Intern. Pay a refundable registration fee of $100 via wire transfer. Contact HR on WhatsApp only.",
-  "source_url": "https://example.com/jobs/123"
+  "status": "healthy",
+  "service": "ScamShield AI",
+  "rule_engine": {
+    "available": true,
+    "rule_count": 8
+  },
+  "machine_learning": {
+    "available": true,
+    "model_type": "TF-IDF + Logistic Regression (scikit-learn)",
+    "model_version": "1.1.0-tfidf-regularized-logreg"
+  },
+  "ocr_service": {
+    "available": true,
+    "engine": "Tesseract OCR"
+  }
 }
 ```
-Returns `200 OK` with separated `rule_based_assessment`, `ml_prediction`, `experimental_triage`, `triggered_rules`, `exact_matched_phrases`, `explanation`, `safety_recommendations`, and `processing_status`.
+
+### `POST /api/analyze`
+Analyzes raw text from a job advertisement or email offer.
+
+**Request (`application/json`):**
+```json
+{
+  "job_text": "Work from home data entry intern. Pay a refundable registration fee of $120 via Telegram/UPI. Direct offer letter without interview.",
+  "source_url": "https://example.com/jobs/42"
+}
+```
+
+**Response (`200 OK`):**
+```json
+{
+  "rule_based_assessment": {
+    "risk_level": "High Risk",
+    "risk_score": 90,
+    "triggered_rule_count": 3
+  },
+  "ml_prediction": {
+    "available": true,
+    "predicted_label": 1,
+    "predicted_class": "fraudulent_pattern_detected",
+    "fraud_probability_score": 0.6855,
+    "fraud_score_pct": 68.6,
+    "model_version": "1.1.0-tfidf-regularized-logreg",
+    "disclaimer": "Statistical ML predictions measure text similarity against historical training data and are NOT proof that a specific job offer is fraudulent or legitimate."
+  },
+  "triggered_rules": [
+    {
+      "id": "RULE_UPFRONT_FEE",
+      "severity": "high",
+      "weight": 55,
+      "exact_matched_phrases": ["refundable registration fee of $120"],
+      "reason": "Asks you to pay money (registration, training, or security fee). Real companies pay you — they do not charge you to join.",
+      "action": "Never pay any fee or deposit for a job or internship, even if they call it refundable."
+    }
+  ],
+  "explanation": {
+    "summary": "This job listing exhibits 3 high-risk warning indicator(s)...",
+    "matched_evidence": ["refundable registration fee of $120"],
+    "actionable_steps": ["Never send money, registration deposits, or gift cards to secure a job."]
+  }
+}
+```
 
 ### `POST /api/analyze-image`
-Request body (`multipart/form-data`):
-- `image`: Screenshot file (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tiff`, max 5 MB).
-- `source_url` (optional): Source page URL string.
+Uploads a screenshot (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tiff`, max 5 MB) for OCR text extraction and full risk analysis.
 
-Returns `200 OK` with `ocr_extraction` metadata alongside the full analysis structure, `400`/`422` for unreadable or blank images, or `503` if Tesseract OCR is not installed.
+**Request (`multipart/form-data`):**
+- `image`: Image file binary
+- `source_url` (optional): Source URL string
+
+**Response (`200 OK`):**
+Returns the full analysis response alongside `ocr_extraction` details (`extracted_character_count`, `ocr_engine`, `line_count`).
 
 ---
 
-## 5. Optional Google Cloud Run Deployment
+## 5. Google Cloud Run Deployment
 
-To deploy the backend container to Google Cloud Run:
-
-1. **Train the model locally first** (if you want ML predictions enabled in Cloud Run) so that `models/fake_job_model.joblib` and `models/model_metadata.json` exist before building the image, or deploy in rule-based + OCR mode.
-2. **Build and deploy using Google Cloud SDK**:
+To deploy the backend to Google Cloud Run:
 
 ```powershell
-# Authenticate and set your GCP project
+# 1. Authenticate with Google Cloud
 gcloud auth login
-gcloud config set project YOUR_GCP_PROJECT_ID
+gcloud config set project YOUR_PROJECT_ID
 
-# Build container image using Cloud Build and deployment/Dockerfile
-gcloud builds submit --tag gcr.io/YOUR_GCP_PROJECT_ID/scamshield-ai:1.0.0 -f deployment/Dockerfile .
+# 2. Build the container image via Cloud Build
+gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/scamshield-ai:1.1.0 -f deployment/Dockerfile .
 
-# Deploy to Cloud Run
+# 3. Deploy to Cloud Run
 gcloud run deploy scamshield-ai `
-  --image gcr.io/YOUR_GCP_PROJECT_ID/scamshield-ai:1.0.0 `
+  --image gcr.io/YOUR_PROJECT_ID/scamshield-ai:1.1.0 `
   --platform managed `
   --region us-central1 `
   --allow-unauthenticated `
@@ -211,14 +277,13 @@ gcloud run deploy scamshield-ai `
   --set-env-vars "SCAMSHIELD_RATE_LIMIT_PER_MINUTE=60,SCAMSHIELD_MAX_TEXT_LENGTH=25000"
 ```
 
-3. **Connect the Chrome Extension**:
-   - Open the ScamShield AI extension popup, expand **Configure Backend Server URL**, enter your Cloud Run HTTPS URL, and click **Apply**.
-   - Note that when using a remote Cloud Run URL, submitted job text and screenshots are transmitted over HTTPS to that service for in-memory processing (and are never stored or logged).
+To connect the extension to your Cloud Run backend, click **Configure Backend Server URL** in the extension popup and input your Cloud Run HTTPS URL.
 
 ---
 
-## 6. Known Limitations & Security Notes
+## 6. Security Guarantees & Privacy Principles
 
-- **Estimates, Not Legal Proof**: Neither rule-based triggers nor statistical ML scores prove that a job listing is fraudulent or legitimate. Sophisticated scams may avoid common trigger phrases, and legitimate listings may occasionally use urgent phrasing.
-- **OCR Accuracy**: Screenshot extraction via Tesseract depends on image resolution, contrast, and layout. Multi-column screenshots or stylized fonts may introduce character recognition errors.
-- **No Persistent Storage**: Submitted job descriptions and uploaded screenshots are processed strictly in memory and are never written to disk or application logs.
+- **Zero Generative AI:** Does not send user text or screenshots to LLM endpoints (OpenAI, Gemini, Ollama, etc.). Eliminates hallucinated facts, data leaks, and token costs.
+- **In-Memory Processing:** Submitted job descriptions and uploaded screenshots are analyzed strictly in volatile memory. No text or images are saved to disk, databases, or logs.
+- **Explainable Assessments:** Every risk score is accompanied by the verbatim phrase that triggered it, so users can verify the evidence themselves.
+- **Empowerment Over Judgment:** ScamShield AI acts as an educational and triage tool, providing actionable verification steps rather than issuing unverifiable verdicts.

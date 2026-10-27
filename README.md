@@ -70,8 +70,7 @@ ScamShieldAI/
 │   ├── fake_job_model.joblib   # Fitted Scikit-learn TF-IDF + LogReg pipeline
 │   └── model_metadata.json     # Training metrics, CV scores, & generalization diagnostics
 ├── scamshield/                 # Core business logic package
-│   ├── __init__.py             # Application factory & route registration
-│   ├── _wsgi_fallback.py       # WSGI entrypoint for production servers (gunicorn)
+│   ├── __init__.py             # Package exports and version metadata
 │   ├── ml_detector.py          # ML model loader & inference wrapper
 │   ├── risk_rules.py           # 6-category regex risk rules & weight calculations
 │   ├── explanation_service.py  # Deterministic templated explanation generator

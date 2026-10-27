@@ -36,7 +36,7 @@ for candidate in (PROJECT_ROOT, PROJECT_ROOT / "ScamShieldAI"):
 import pandas as pd
 from PIL import Image, ImageDraw
 
-from app import create_app
+from app import SlidingWindowRateLimiter, create_app
 from scamshield.ml_detector import MLDetector
 from train_model import load_and_validate_dataset
 
@@ -281,6 +281,41 @@ class TestScamShieldAPI(unittest.TestCase):
 
         # Client B is not blocked
         self.assertEqual(limited_client.get("/api/health", headers={"X-Forwarded-For": "198.51.100.2"}).status_code, 200)
+
+        # Attacker cannot bypass by prepending a spoofed IP to X-Forwarded-For
+        self.assertEqual(
+            limited_client.get("/api/health", headers={"X-Forwarded-For": "1.2.3.4, 198.51.100.1"}).status_code,
+            429,
+        )
+
+    def test_sliding_window_rate_limiter_thread_safety_and_memory_cleanup(self) -> None:
+        """Verify thread-safety under concurrency and bounded memory cleanup."""
+        import collections
+        import concurrent.futures
+        import time
+
+        limiter = SlidingWindowRateLimiter(max_requests=10, window_seconds=0.05)
+
+        def _request(client_id: str) -> bool:
+            allowed, _ = limiter.is_allowed(client_id)
+            return allowed
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(_request, "client_concurrent") for _ in range(20)]
+            results = [f.result() for f in futures]
+
+        self.assertEqual(results.count(True), 10)
+        self.assertEqual(results.count(False), 10)
+
+        # Populate with 1050 expired entries
+        limiter._requests = collections.defaultdict(
+            collections.deque,
+            {f"ip_{i}": collections.deque([time.monotonic() - 100]) for i in range(1050)},
+        )
+        allowed, _ = limiter.is_allowed("ip_new")
+        self.assertTrue(allowed)
+        # Stale keys swept down from 1050 to only the new entry
+        self.assertLessEqual(len(limiter._requests), 10)
 
     def test_analyze_image_with_url_alias(self) -> None:
         """Verify POST /api/analyze-image accepts 'url' form field as alias for 'source_url'."""

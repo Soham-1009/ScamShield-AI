@@ -146,7 +146,7 @@ class OCRService:
             processed = image.convert("RGB")
             grayscale = ImageOps.grayscale(processed)
             width, height = grayscale.size
-            if height < 900 and width < 1800:
+            if height < 400 or width < 600:
                 resample_filter = getattr(Image, "Resampling", Image).BICUBIC
                 grayscale = grayscale.resize((width * 2, height * 2), resample=resample_filter)
             raw_text = pytesseract.image_to_string(grayscale)

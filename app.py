@@ -25,13 +25,12 @@ from __future__ import annotations
 import collections
 import os
 import re
+import threading
 import time
 from typing import Any, Deque, Dict, Optional, Tuple
 
-try:
-    from flask import Flask, jsonify, make_response, request  # type: ignore
-except ImportError:
-    from scamshield._wsgi_fallback import Flask, jsonify, make_response, request  # type: ignore
+from flask import Flask, jsonify, make_response, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from scamshield import __version__
 from scamshield.explanation_service import DeterministicExplanationService
@@ -61,12 +60,13 @@ ALLOWED_ORIGIN_PATTERNS = [
 
 
 class SlidingWindowRateLimiter:
-    """In-memory per-IP sliding-window rate limiter."""
+    """Thread-safe, bounded in-memory per-IP sliding-window rate limiter."""
 
     def __init__(self, max_requests: int = DEFAULT_RATE_LIMIT_PER_MINUTE, window_seconds: float = 60.0) -> None:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._requests: Dict[str, Deque[float]] = collections.defaultdict(collections.deque)
+        self._lock = threading.Lock()
 
     def is_allowed(self, client_key: str) -> Tuple[bool, int]:
         """Return (allowed, retry_after_seconds)."""
@@ -74,17 +74,25 @@ class SlidingWindowRateLimiter:
             return True, 0
 
         now = time.monotonic()
-        dq = self._requests[client_key]
         cutoff = now - self.window_seconds
-        while dq and dq[0] <= cutoff:
-            dq.popleft()
 
-        if len(dq) >= self.max_requests:
-            retry_after = max(1, int(self.window_seconds - (now - dq[0])))
-            return False, retry_after
+        with self._lock:
+            # Sweep stale entries when dictionary grows to prevent unbounded memory growth
+            if len(self._requests) > 1000:
+                stale_keys = [k for k, dq in self._requests.items() if not dq or dq[-1] <= cutoff]
+                for k in stale_keys:
+                    del self._requests[k]
 
-        dq.append(now)
-        return True, 0
+            dq = self._requests[client_key]
+            while dq and dq[0] <= cutoff:
+                dq.popleft()
+
+            if len(dq) >= self.max_requests:
+                retry_after = max(1, int(self.window_seconds - (now - dq[0])))
+                return False, retry_after
+
+            dq.append(now)
+            return True, 0
 
 
 def _build_analysis_response(
@@ -170,6 +178,8 @@ def create_app(
 ) -> Flask:
     """Application factory for the ScamShield AI Flask backend."""
     app = Flask(__name__)
+    # Standard reverse-proxy header handling (trusted 1 hop behind Cloud Run / GFE / Nginx)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     # Cap overall HTTP request body to max_image_bytes + 512 KB overhead
     app.config["MAX_CONTENT_LENGTH"] = max_image_bytes + (512 * 1024)
 
@@ -180,11 +190,7 @@ def create_app(
     rate_limiter = SlidingWindowRateLimiter(max_requests=rate_limit_per_minute)
 
     def _check_rate_limit() -> Optional[Any]:
-        client_ip = (
-            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or request.remote_addr
-            or "127.0.0.1"
-        )
+        client_ip = request.remote_addr or "127.0.0.1"
         allowed, retry_after = rate_limiter.is_allowed(client_ip)
         if not allowed:
             resp = make_response(

@@ -130,7 +130,7 @@ def train_and_compare_distilbert(
             (
                 "tfidf",
                 TfidfVectorizer(
-                    max_features=25000,
+                    max_features=5000,
                     ngram_range=(1, 2),
                     stop_words="english",
                     sublinear_tf=True,

@@ -5,11 +5,13 @@
   "description": "Explainable Fake Job & Internship Detector. Scan job listings or screenshots for warning signals with transparent evidence and verification steps.",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "http://127.0.0.1:5000/*",
-    "http://localhost:5000/*"
+    "http://localhost:5000/*",
+    "https://*/*"
   ],
   "action": {
     "default_title": "ScamShield AI — Job & Internship Risk Analyzer",

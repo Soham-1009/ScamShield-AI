@@ -218,6 +218,36 @@ body {
   max-width: 220px;
 }
 
+.server-url-row {
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.server-url-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.server-url-input {
+  flex: 1;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+.server-url-input:focus {
+  outline: 1px solid var(--navy);
+  border-color: var(--navy);
+}
+
 /* Error Card */
 .error-card {
   background-color: var(--red-bg);

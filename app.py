@@ -212,16 +212,21 @@ def create_app(
     def apply_cors_and_security_headers(response: Any) -> Any:
         origin = request.headers.get("Origin", "")
         custom_allowed = os.environ.get("SCAMSHIELD_CORS_ORIGIN", "")
-        if custom_allowed and origin == custom_allowed:
+        is_local_origin = any(pat.match(origin) for pat in ALLOWED_ORIGIN_PATTERNS[1:])
+        is_extension_origin = bool(ALLOWED_ORIGIN_PATTERNS[0].match(origin))
+        origin_allowed = bool(origin) and (
+            origin == custom_allowed
+            or is_local_origin
+            or (not custom_allowed and is_extension_origin)
+        )
+        if origin_allowed:
             response.headers["Access-Control-Allow-Origin"] = origin
-        elif origin and any(pat.match(origin) for pat in ALLOWED_ORIGIN_PATTERNS):
-            response.headers["Access-Control-Allow-Origin"] = origin
-        else:
-            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Vary"] = "Origin"
 
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, Authorization"
-        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        if origin_allowed and (is_local_origin or is_extension_origin):
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
         response.headers["Access-Control-Max-Age"] = "3600"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Cache-Control"] = "no-store"

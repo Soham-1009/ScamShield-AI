@@ -12,12 +12,12 @@ Key features:
 - Deduplicates text records and strips synthetic batch tags to prevent train/test leakage.
 - Combines relevant text columns (`title`, `company_profile`, `description`,
   `requirements`, `benefits`) while safely handling missing values.
-- Uses a stratified train/test split (`test_size=0.2`, `random_state=42`).
+- Uses a group-isolated stratified holdout and CV by default; row-random evaluation is an explicit exploratory option.
 - Prevents data leakage by fitting `TfidfVectorizer` strictly inside a
   Scikit-learn `Pipeline` on the training split only; the held-out test split
   is never used for feature fitting or threshold tuning.
-- Applies 5-fold Stratified Cross-Validation on the training split to select
-  an optimal regularized inverse penalty `C`.
+- Applies group-isolated cross-validation on the training split to select
+  the regularization parameter `C`.
 - Evaluates both train-set and test-set performance, reporting precision, recall,
   F1-score, confusion matrix, PR-AUC, and the generalization gap (`train_f1 - test_f1`).
 - Saves the fitted pipeline to `models/fake_job_model.joblib` and evaluation
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -58,6 +59,157 @@ DEFAULT_POPUP_JS_PATH = "extension/popup.js"
 BATCH_TAG_REGEX = re.compile(r"\s*\(Batch\s*\d+\)", re.IGNORECASE)
 
 
+def make_holdout_indices(
+    labels: Sequence[int],
+    groups: Optional[Sequence[str]],
+    test_size: float,
+    random_state: int,
+    split_strategy: str,
+) -> Tuple[List[int], List[int]]:
+    """Create a group-isolated holdout by default; random splitting is explicit opt-in."""
+    from sklearn.model_selection import StratifiedGroupKFold, train_test_split  # type: ignore
+
+    indices = list(range(len(labels)))
+    if split_strategy == "random":
+        train_idx, test_idx = train_test_split(
+            indices, test_size=test_size, random_state=random_state, stratify=labels
+        )
+        return list(train_idx), list(test_idx)
+
+    if split_strategy != "group":
+        raise ValueError("split_strategy must be 'group' or 'random'.")
+    if groups is None or len(groups) != len(labels):
+        raise ValueError(
+            "A group column is required for the default group-isolated evaluation. "
+            "Add a stable employer/source/campaign group ID and pass --group-column, "
+            "or explicitly use --split-strategy random for exploratory runs only."
+        )
+
+    folds = max(2, min(10, round(1.0 / test_size)))
+    groups_by_label = {
+        label: {groups[i] for i, target in enumerate(labels) if target == label}
+        for label in (0, 1)
+    }
+    max_folds = min(len(groups_by_label[0]), len(groups_by_label[1]))
+    if max_folds < folds:
+        raise ValueError(
+            f"Group split needs at least {folds} distinct groups in each class; "
+            f"found {len(groups_by_label[0])} non-fraud and {len(groups_by_label[1])} fraud groups."
+        )
+
+    splitter = StratifiedGroupKFold(n_splits=folds, shuffle=True, random_state=random_state)
+    for train_idx, test_idx in splitter.split(indices, labels, groups):
+        if set(labels[i] for i in test_idx) == {0, 1}:
+            train_groups = {groups[i] for i in train_idx}
+            test_groups = {groups[i] for i in test_idx}
+            if train_groups.isdisjoint(test_groups):
+                return list(train_idx), list(test_idx)
+    raise ValueError("Could not produce a group-isolated holdout containing both classes.")
+
+
+def make_cv_splits(
+    labels: Sequence[int],
+    groups: Optional[Sequence[str]],
+    random_state: int,
+    split_strategy: str,
+) -> Tuple[List[Tuple[List[int], List[int]]], int]:
+    """Build CV folds that preserve class coverage and, when available, group isolation."""
+    from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold  # type: ignore
+
+    if split_strategy == "group":
+        if groups is None or len(groups) != len(labels):
+            raise ValueError("Group-aware cross-validation requires a group column.")
+        groups_by_label = {
+            label: {groups[i] for i, target in enumerate(labels) if target == label}
+            for label in (0, 1)
+        }
+        folds = min(5, len(groups_by_label[0]), len(groups_by_label[1]))
+        if folds < 2:
+            raise ValueError("Group-aware cross-validation needs at least two groups per class.")
+        splitter = StratifiedGroupKFold(n_splits=folds, shuffle=True, random_state=random_state)
+        splits = [(list(a), list(b)) for a, b in splitter.split(range(len(labels)), labels, groups)]
+        for train_idx, val_idx in splits:
+            if set(labels[i] for i in train_idx) != {0, 1} or set(labels[i] for i in val_idx) != {0, 1}:
+                raise ValueError("A grouped CV fold is missing a class; collect more labeled groups.")
+            if {groups[i] for i in train_idx}.intersection(groups[i] for i in val_idx):
+                raise ValueError("Group leakage detected in a cross-validation fold.")
+        return splits, folds
+
+    from sklearn.model_selection import StratifiedKFold
+    folds = min(5, min(labels.count(0), labels.count(1)))
+    if folds < 2:
+        raise ValueError("Stratified cross-validation needs at least two examples per class.")
+    splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=random_state)
+    return [(list(a), list(b)) for a, b in splitter.split(range(len(labels)), labels)], folds
+
+
+def threshold_evaluation(
+    labels: Sequence[int], probabilities: Sequence[float], thresholds: Sequence[float]
+) -> Dict[str, Dict[str, float | int]]:
+    """Report positive-class precision/recall and error counts at explicit thresholds."""
+    results: Dict[str, Dict[str, float | int]] = {}
+    for threshold in thresholds:
+        tp = fp = tn = fn = 0
+        for actual, probability in zip(labels, probabilities):
+            predicted = int(probability >= threshold)
+            if actual == 1 and predicted == 1:
+                tp += 1
+            elif actual == 0 and predicted == 1:
+                fp += 1
+            elif actual == 0 and predicted == 0:
+                tn += 1
+            else:
+                fn += 1
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        results[f"{threshold:.2f}"] = {
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "false_positives": fp,
+            "false_negatives": fn,
+            "true_positives": tp,
+            "true_negatives": tn,
+        }
+    return results
+
+
+def calibration_summary(
+    labels: Sequence[int], probabilities: Sequence[float], bins: int = 10
+) -> Dict[str, Any]:
+    """Return descriptive Brier/ECE metrics and equal-width reliability bins."""
+    if not labels:
+        return {"brier_score": None, "expected_calibration_error": None, "bins": []}
+    rows: List[Dict[str, Any]] = []
+    weighted_error = 0.0
+    for bin_index in range(bins):
+        lower = bin_index / bins
+        upper = (bin_index + 1) / bins
+        selected = [
+            (int(label), float(probability))
+            for label, probability in zip(labels, probabilities)
+            if lower <= probability < upper or (bin_index == bins - 1 and probability == 1.0)
+        ]
+        if not selected:
+            continue
+        mean_probability = sum(prob for _, prob in selected) / len(selected)
+        observed_rate = sum(label for label, _ in selected) / len(selected)
+        weighted_error += len(selected) / len(labels) * abs(mean_probability - observed_rate)
+        rows.append({
+            "lower_bound": round(lower, 2),
+            "upper_bound": round(upper, 2),
+            "count": len(selected),
+            "mean_score": round(mean_probability, 4),
+            "observed_positive_rate": round(observed_rate, 4),
+        })
+    brier = sum((float(prob) - int(label)) ** 2 for label, prob in zip(labels, probabilities)) / len(labels)
+    return {
+        "brier_score": round(brier, 4),
+        "expected_calibration_error": round(weighted_error, 4),
+        "bins": rows,
+        "interpretation": "Descriptive only; a small holdout cannot establish probability calibration.",
+    }
+
+
 def print_dataset_setup_instructions(dataset_path: Path) -> None:
     """Print clear instructions when the training dataset is missing."""
     msg = f"""
@@ -69,9 +221,11 @@ dataset containing recruitment listings (such as the public Employment Scam
 Aegean Dataset / 'fake_job_postings.csv').
 
 1. Expected CSV Columns:
-   - Required target column: 'fraudulent' (0 for non-fraudulent, 1 for fraudulent)
+   - Required target column: 'fraudulent' (0 for reviewed non-fraud example, 1 for reviewed fraud example)
    - Text columns (at least 'description' or a subset of):
      'title', 'company_profile', 'description', 'requirements', 'benefits'
+   - For the default evaluation, add a stable, pseudonymous employer/source/campaign group ID
+     and pass its column name with --group-column. A unique row ID is not a group ID.
 
 2. Setup Steps:
    - Place the CSV file at:
@@ -145,7 +299,14 @@ def load_and_validate_dataset(
     if df.empty:
         raise ValueError("All rows had empty text fields after combining text columns.")
 
-    # Deduplicate on combined_text to guarantee zero data leakage between train and test
+    # Reject contradictory labels before exact-text deduplication.
+    conflicting_texts = df.groupby("combined_text")[target_column].nunique()
+    if (conflicting_texts > 1).any():
+        raise ValueError(
+            "Identical combined text has conflicting labels. Review and adjudicate these records before training."
+        )
+
+    # Exact deduplication helps; near-duplicate and campaign leakage still require group IDs.
     initial_count = len(df)
     df = df.drop_duplicates(subset=["combined_text"]).copy()
     dropped_duplicates = initial_count - len(df)
@@ -163,7 +324,7 @@ def load_and_validate_dataset(
 
     if min(class_counts.values()) < 2:
         raise ValueError(
-            "Each class (0 and 1) must have at least 2 samples to perform a stratified train/test split."
+            "Each class (0 and 1) must have at least 2 samples before creating evaluation splits."
         )
 
     return df
@@ -206,13 +367,13 @@ def export_model_to_extension_js(
     try:
         content = popup_js_path.read_text(encoding="utf-8")
         replacement = f"const ML_MODEL = {json.dumps(ml_model_obj)};"
-        new_content = re.sub(
-            r"const ML_MODEL\s*=\s*\{.*?\};",
-            replacement,
-            content,
-            count=1,
-            flags=re.DOTALL,
-        )
+        # A JSON replacement string may contain backslash-u sequences from
+        # token text; re.sub would interpret those as replacement escapes.
+        pattern = re.compile(r"const ML_MODEL\s*=\s*\{.*?\};", flags=re.DOTALL)
+        new_content, replacements = pattern.subn(lambda _match: replacement, content, count=1)
+        if replacements != 1:
+            print("[ScamShield AI] Warning: Could not find the ML_MODEL object in extension JavaScript.", file=sys.stderr)
+            return False
         if new_content != content:
             popup_js_path.write_text(new_content, encoding="utf-8")
             print(f"[ScamShield AI] Synced {len(vocab)} model weights to extension at {popup_js_path}")
@@ -232,6 +393,8 @@ def train_and_evaluate(
     max_features: int = 5000,
     c_candidates: Sequence[float] = (0.05, 0.1, 0.25, 0.5, 1.0),
     popup_js_path: Optional[Path] = None,
+    group_column: Optional[str] = None,
+    split_strategy: str = "group",
 ) -> Dict[str, Any]:
     """
     Execute the end-to-end training, hyperparameter regularization tuning,
@@ -245,13 +408,15 @@ def train_and_evaluate(
         from sklearn.linear_model import LogisticRegression  # type: ignore
         from sklearn.metrics import (  # type: ignore
             average_precision_score,
+            brier_score_loss,
             classification_report,
             confusion_matrix,
             f1_score,
+            log_loss,
             precision_score,
             recall_score,
         )
-        from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split  # type: ignore
+        from sklearn.model_selection import cross_val_score  # type: ignore
         from sklearn.pipeline import Pipeline  # type: ignore
     except ImportError as exc:
         raise RuntimeError(
@@ -262,24 +427,32 @@ def train_and_evaluate(
 
     X = df["combined_text"].tolist()
     y = df[TARGET_COLUMN].tolist()
+    groups: Optional[List[str]] = None
+    if group_column:
+        if group_column not in df.columns:
+            raise ValueError(f"Group column '{group_column}' was not found in the dataset.")
+        group_values = df[group_column].fillna("").astype(str).str.strip()
+        if (group_values == "").any():
+            raise ValueError(f"Group column '{group_column}' contains missing or blank values.")
+        groups = group_values.tolist()
 
-    # Stratified split BEFORE any TF-IDF fitting to prevent data leakage
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=y,
-    )
+    train_idx, test_idx = make_holdout_indices(y, groups, test_size, random_state, split_strategy)
+    X_train = [X[i] for i in train_idx]
+    X_test = [X[i] for i in test_idx]
+    y_train = [y[i] for i in train_idx]
+    y_test = [y[i] for i in test_idx]
+    groups_train = [groups[i] for i in train_idx] if groups is not None else None
+    groups_test = [groups[i] for i in test_idx] if groups is not None else None
 
-    # Stratified K-Fold cross-validation on X_train to select regularized C with optimal probability calibration
-    n_splits = min(5, min(y_train.count(0), y_train.count(1)))
+    # Stratified K-Fold compares F1 and log-loss across regularization values.
+    # Log-loss selection does not calibrate predict_proba outputs.
+    cv_splits, n_splits = make_cv_splits(y_train, groups_train, random_state, split_strategy)
     best_c = 0.5
     best_cv_loss = float("inf")
     cv_diagnostics: Dict[str, Any] = {}
 
     if n_splits >= 2:
-        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+        cv = cv_splits
         for c_val in c_candidates:
             candidate_pipe = Pipeline(
                 steps=[
@@ -318,8 +491,8 @@ def train_and_evaluate(
                 "std_f1": round(std_f1, 4),
                 "mean_log_loss": round(mean_loss, 4),
             }
-            # Select candidate that minimizes log-loss while maintaining top F1
-            if mean_f1 >= 0.90 and mean_loss < best_cv_loss:
+            # Select the lowest CV log-loss; this does not make scores calibrated.
+            if mean_loss < best_cv_loss:
                 best_cv_loss = mean_loss
                 best_c = c_val
     else:
@@ -385,6 +558,14 @@ def train_and_evaluate(
         output_dict=True,
         zero_division=0,
     )
+    test_threshold_metrics = threshold_evaluation(
+        y_test, y_test_proba, (0.10, 0.25, 0.50, 0.75, 0.90)
+    )
+    test_calibration = calibration_summary(y_test, y_test_proba)
+    test_calibration["log_loss"] = round(float(log_loss(y_test, y_test_proba, labels=[0, 1])), 4)
+    test_calibration["brier_score_sklearn"] = round(
+        float(brier_score_loss(y_test, y_test_proba)), 4
+    )
 
     generalization_gap_f1 = round(train_f1 - test_f1, 4)
 
@@ -407,6 +588,7 @@ def train_and_evaluate(
     metadata: Dict[str, Any] = {
         "model_version": "1.1.0-tfidf-regularized-logreg",
         "trained_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "deployment_status": "research_only",
         "architecture": (
             f"Pipeline(TfidfVectorizer(max_features={max_features}, ngram_range=(1,2), sublinear_tf=True), "
             f"LogisticRegression(C={best_c}, class_weight='balanced'))"
@@ -420,14 +602,34 @@ def train_and_evaluate(
             "cross_validation_folds": n_splits,
         },
         "threshold": 0.50,
+        "evaluation_split": {
+            "strategy": split_strategy,
+            "group_column": group_column,
+            "group_isolation_applied": split_strategy == "group",
+            "train_test_group_overlap": (
+                bool(set(groups_train or []).intersection(groups_test or []))
+                if groups is not None
+                else None
+            ),
+        },
+        "probability_calibration": (
+            "Not calibrated. predict_proba is an experimental classifier score and must not be "
+            "interpreted as the real-world probability that a listing is fraudulent."
+        ),
         "data_leakage_prevention": (
             "Deduplication performed on combined text to eliminate duplicate records. "
             "Synthetic batch tags stripped prior to splitting. "
-            "Stratified train/test split performed prior to TfidfVectorizer fitting. "
-            "Held-out test set was used strictly for final reporting and never for threshold tuning."
+            f"A '{split_strategy}' train/test split was performed before TfidfVectorizer fitting. "
+            + (
+                f"Groups from '{group_column}' were isolated between train and test and between CV folds. "
+                if split_strategy == "group"
+                else "Random row split is exploratory and may leak employer/campaign patterns. "
+            )
+            + "Held-out test set was used strictly for final reporting and never for model selection."
         ),
         "dataset_summary": {
-            "source_path": str(csv_path),
+            "source_file": csv_path.name,
+            "source_sha256": hashlib.sha256(csv_path.read_bytes()).hexdigest(),
             "total_valid_rows": len(df),
             "train_rows": len(X_train),
             "test_rows": len(X_test),
@@ -435,6 +637,7 @@ def train_and_evaluate(
             "non_fraudulent_count_total": int(len(y) - sum(y)),
             "fraud_rate_pct": round((sum(y) / len(y)) * 100.0, 2),
             "text_columns_combined": [c for c in TEXT_COLUMNS if c in df.columns],
+            "group_count": len(set(groups)) if groups is not None else None,
         },
         "cross_validation_results": cv_diagnostics,
         "train_set_evaluation": {
@@ -462,6 +665,8 @@ def train_and_evaluate(
                 "matrix_2x2": [[test_tn, test_fp], [test_fn, test_tp]],
             },
             "classification_report": test_report_dict,
+            "metrics_by_threshold": test_threshold_metrics,
+            "calibration_diagnostics": test_calibration,
         },
         "generalization_diagnostics": {
             "generalization_gap_f1": generalization_gap_f1,
@@ -479,6 +684,12 @@ def train_and_evaluate(
             "Model predictions reflect statistical word/phrase associations in historical training "
             "data and do not constitute definitive proof that a job advertisement is fraudulent or legitimate."
         ),
+        "evaluation_limitations": [
+            "This is one held-out split; metrics may vary across employers, platforms, regions, languages, and time periods.",
+            "Group isolation is only as reliable as the supplied group IDs; proxy groups and unique-row fallbacks do not guarantee employer or campaign isolation.",
+            "The dataset may be historical, curated, or class-balanced and does not establish current real-world fraud prevalence.",
+            "Calibration diagnostics are descriptive only; classifier scores are not calibrated fraud probabilities.",
+        ],
     }
 
     with open(metadata_output_path, "w", encoding="utf-8") as fh:
@@ -535,6 +746,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Random seed for reproducible splitting and training (default: 42).",
     )
     parser.add_argument(
+        "--group-column",
+        type=str,
+        default=None,
+        help="Stable employer/source/campaign group ID column required for group-isolated evaluation.",
+    )
+    parser.add_argument(
+        "--split-strategy",
+        choices=("group", "random"),
+        default="group",
+        help="Use group-isolated evaluation by default; random is exploratory only.",
+    )
+    parser.add_argument(
         "--max-features",
         type=int,
         default=5000,
@@ -559,6 +782,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             random_state=args.random_state,
             max_features=args.max_features,
             popup_js_path=popup_js_path,
+            group_column=args.group_column,
+            split_strategy=args.split_strategy,
         )
     except FileNotFoundError:
         return 2
@@ -570,6 +795,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     train_metrics = metadata["train_set_evaluation"]
     cm = eval_metrics["confusion_matrix"]
     gen_diag = metadata["generalization_diagnostics"]
+    if args.split_strategy == "random":
+        print(
+            "[EXPLORATORY ONLY] Random row splitting can leak employer/campaign patterns; "
+            "do not use these metrics as production evidence.",
+            file=sys.stderr,
+        )
     print("================================================================================")
     print("[ScamShield AI] Baseline TF-IDF + Logistic Regression Training Complete")
     print("================================================================================")
@@ -585,6 +816,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Test Precision      : {eval_metrics['fraudulent_class_precision']:.4f}")
     print(f"Test Recall         : {eval_metrics['fraudulent_class_recall']:.4f}")
     print(f"Test PR-AUC         : {eval_metrics['fraudulent_class_average_precision_pr_auc']:.4f}")
+    threshold_metrics = eval_metrics["metrics_by_threshold"]
+    print(
+        "Threshold 0.50     : "
+        f"precision={threshold_metrics['0.50']['precision']:.4f}, "
+        f"recall={threshold_metrics['0.50']['recall']:.4f}, "
+        f"FP={threshold_metrics['0.50']['false_positives']}, "
+        f"FN={threshold_metrics['0.50']['false_negatives']}"
+    )
+    calibration = eval_metrics["calibration_diagnostics"]
+    print(
+        "Calibration checks  : "
+        f"Brier={calibration['brier_score']:.4f}, "
+        f"ECE={calibration['expected_calibration_error']:.4f} (diagnostic only)"
+    )
     print(
         f"Confusion Matrix    : TN={cm['true_negatives']}, FP={cm['false_positives']}, "
         f"FN={cm['false_negatives']}, TP={cm['true_positives']}"

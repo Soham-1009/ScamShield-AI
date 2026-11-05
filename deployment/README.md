@@ -22,6 +22,7 @@ The Docker container is built on `python:3.11-slim` and includes:
 | `SCAMSHIELD_HOST` | `0.0.0.0` | Host bind address for incoming connections. |
 | `SCAMSHIELD_PORT` | `5000` | Port used when running via `python app.py`. |
 | `SCAMSHIELD_RATE_LIMIT_PER_MINUTE` | `60` | Sliding window rate limit per client IP address. |
+| `SCAMSHIELD_CORS_ORIGIN` | unset | Exact production Chrome extension origin to allow. CORS is not authentication. |
 | `SCAMSHIELD_MAX_TEXT_LENGTH` | `25000` | Maximum character length for job description analysis. |
 | `SCAMSHIELD_MODEL_PATH` | `models/fake_job_model.joblib` | Path to fitted Scikit-learn Joblib pipeline. |
 | `SCAMSHIELD_MODEL_METADATA_PATH` | `models/model_metadata.json` | Path to model metadata and diagnostics JSON. |
@@ -32,10 +33,10 @@ The Docker container is built on `python:3.11-slim` and includes:
 ## 3. Local Docker Build & Run
 
 ### Step 1: Pre-train the ML Model (Optional)
-If you want statistical ML predictions enabled in your container, run the training pipeline locally first so the model files exist:
+If you want statistical ML predictions enabled in your container, train from reviewed data with an employer/source/campaign group field first. The repository's 120-row local dataset has no such field; only use it for an explicitly exploratory random split:
 
 ```powershell
-python train_model.py --data-path data\fake_job_postings.csv
+python train_model.py --data-path data\reviewed_jobs.csv --group-column employer_group
 ```
 
 ### Step 2: Build the Container Image
@@ -75,8 +76,10 @@ gcloud run deploy scamshield-ai `
   --image gcr.io/YOUR_PROJECT_ID/scamshield-ai:1.1.0 `
   --platform managed `
   --region us-central1 `
-  --allow-unauthenticated `
+  --no-allow-unauthenticated `
   --memory 1Gi `
   --cpu 1 `
-  --set-env-vars "SCAMSHIELD_RATE_LIMIT_PER_MINUTE=60,SCAMSHIELD_MAX_TEXT_LENGTH=25000"
+  --set-env-vars "SCAMSHIELD_CORS_ORIGIN=chrome-extension://YOUR_EXTENSION_ID,SCAMSHIELD_RATE_LIMIT_PER_MINUTE=60,SCAMSHIELD_MAX_TEXT_LENGTH=25000"
 ```
+
+This deploys Cloud Run as a private service. Do not switch it to unauthenticated access for convenience: the extension cannot safely contain a shared server secret. If users need remote screenshot OCR, put an authenticated API gateway in front of the service and apply edge rate limits (for example, Cloud Armor) there. The Flask limiter is in-memory per process and is only a secondary local safeguard; it is not a service-wide public abuse control. Configure the exact production extension ID in `SCAMSHIELD_CORS_ORIGIN`; CORS still does not replace gateway authentication.

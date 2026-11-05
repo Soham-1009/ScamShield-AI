@@ -2,8 +2,8 @@
 Optional DistilBERT Sequence Classifier Upgrade (`train_distilbert.py`).
 
 Fine-tunes `distilbert-base-uncased` (or a specified Hugging Face sequence
-classification model) on the same fake job posting dataset using a three-way
-stratified split (train / validation / held-out test), class-weighted cross-entropy
+classification model) on the same fake job posting dataset using group-isolated
+train / validation / held-out test splits by default, class-weighted cross-entropy
 loss to handle severe class imbalance, and evaluates fraud-class precision, recall,
 F1-score, and average precision.
 
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import sys
@@ -36,7 +37,10 @@ from train_model import (
     DEFAULT_DATASET_PATH,
     TARGET_COLUMN,
     TEXT_COLUMNS,
+    calibration_summary,
     load_and_validate_dataset,
+    make_holdout_indices,
+    threshold_evaluation,
 )
 
 DEFAULT_DISTILBERT_DIR = os.environ.get("SCAMSHIELD_DISTILBERT_DIR", "models/distilbert_fake_job")
@@ -73,6 +77,8 @@ def train_and_compare_distilbert(
     learning_rate: float = 2e-5,
     max_length: int = 256,
     random_state: int = 42,
+    group_column: str | None = None,
+    split_strategy: str = "group",
 ) -> Dict[str, Any]:
     """
     Fine-tune a DistilBERT sequence classifier with weighted loss, validate on a
@@ -91,7 +97,6 @@ def train_and_compare_distilbert(
         precision_score,
         recall_score,
     )
-    from sklearn.model_selection import train_test_split  # type: ignore
     from sklearn.pipeline import Pipeline  # type: ignore
     from torch.utils.data import Dataset  # type: ignore
     from transformers import (  # type: ignore
@@ -105,24 +110,33 @@ def train_and_compare_distilbert(
     df = load_and_validate_dataset(csv_path, TEXT_COLUMNS, TARGET_COLUMN)
     texts = df["combined_text"].tolist()
     labels = df[TARGET_COLUMN].tolist()
+    groups: List[str] | None = None
+    if group_column:
+        if group_column not in df.columns:
+            raise ValueError(f"Group column '{group_column}' was not found in the dataset.")
+        group_values = df[group_column].fillna("").astype(str).str.strip()
+        if (group_values == "").any():
+            raise ValueError(f"Group column '{group_column}' contains missing or blank values.")
+        groups = group_values.tolist()
 
-    # Step 1: Hold out 20% test set (common to both TF-IDF baseline and DistilBERT)
-    X_train_full, X_test, y_train_full, y_test = train_test_split(
-        texts,
-        labels,
-        test_size=0.20,
-        random_state=random_state,
-        stratify=labels,
+    # Keep identical group-isolated evaluation boundaries for both model families.
+    train_indices, test_indices = make_holdout_indices(
+        labels, groups, 0.20, random_state, split_strategy
     )
+    X_train_full = [texts[i] for i in train_indices]
+    X_test = [texts[i] for i in test_indices]
+    y_train_full = [labels[i] for i in train_indices]
+    y_test = [labels[i] for i in test_indices]
+    groups_train_full = [groups[i] for i in train_indices] if groups is not None else None
 
-    # Step 2: Split remaining 80% into train (85% of 80% = 68%) and validation (15% of 80% = 12%)
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_full,
-        y_train_full,
-        test_size=0.15,
-        random_state=random_state,
-        stratify=y_train_full,
+    # Keep groups isolated between fine-tuning and validation too.
+    train_sub_indices, val_indices = make_holdout_indices(
+        y_train_full, groups_train_full, 0.15, random_state, split_strategy
     )
+    X_train = [X_train_full[i] for i in train_sub_indices]
+    X_val = [X_train_full[i] for i in val_indices]
+    y_train = [y_train_full[i] for i in train_sub_indices]
+    y_val = [y_train_full[i] for i in val_indices]
 
     # Step 3: Fit TF-IDF + Logistic Regression baseline on X_train for direct comparison on X_test
     baseline_pipeline = Pipeline(
@@ -156,6 +170,8 @@ def train_and_compare_distilbert(
         "recall": round(float(recall_score(y_test, base_pred, pos_label=1, zero_division=0)), 4),
         "f1_score": round(float(f1_score(y_test, base_pred, pos_label=1, zero_division=0)), 4),
         "average_precision": round(float(average_precision_score(y_test, base_proba)), 4),
+        "metrics_by_threshold": threshold_evaluation(y_test, base_proba, (0.10, 0.25, 0.50, 0.75, 0.90)),
+        "calibration_diagnostics": calibration_summary(y_test, base_proba),
     }
 
     # Step 4: Prepare DistilBERT tokenizer and dataset
@@ -227,6 +243,10 @@ def train_and_compare_distilbert(
             "recall": round(float(recall_score(all_targets, all_preds, pos_label=1, zero_division=0)), 4),
             "f1_score": round(float(f1_score(all_targets, all_preds, pos_label=1, zero_division=0)), 4),
             "average_precision": round(float(average_precision_score(all_targets, all_probs)), 4),
+            "metrics_by_threshold": threshold_evaluation(
+                all_targets, all_probs, (0.10, 0.25, 0.50, 0.75, 0.90)
+            ),
+            "calibration_diagnostics": calibration_summary(all_targets, all_probs),
             "confusion_matrix": {
                 "tn": int(cm[0, 0]),
                 "fp": int(cm[0, 1]),
@@ -283,6 +303,24 @@ def train_and_compare_distilbert(
     report: Dict[str, Any] = {
         "evaluated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "pretrained_model": pretrained_model_name,
+        "dataset": {
+            "source_file": csv_path.name,
+            "source_sha256": hashlib.sha256(csv_path.read_bytes()).hexdigest(),
+            "rows": len(df),
+        },
+        "evaluation_split": {
+            "strategy": split_strategy,
+            "group_column": group_column,
+            "group_isolation_applied": split_strategy == "group",
+            "test_group_overlap": (
+                bool(set(groups_train_full or []).intersection(groups[i] for i in test_indices))
+                if groups is not None
+                else None
+            ),
+        },
+        "probability_calibration": (
+            "Not calibrated; probability-like scores are experimental and not real-world fraud probabilities."
+        ),
         "split_sizes": {
             "train": len(X_train),
             "validation": len(X_val),
@@ -342,6 +380,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate (default: 2e-5).")
     parser.add_argument("--max-length", type=int, default=256, help="Maximum sequence token length (default: 256).")
     parser.add_argument("--random-state", type=int, default=42, help="Random seed (default: 42).")
+    parser.add_argument("--group-column", type=str, default=None, help="Stable employer/source/campaign group ID column.")
+    parser.add_argument(
+        "--split-strategy",
+        choices=("group", "random"),
+        default="group",
+        help="Use group-isolated evaluation by default; random is exploratory only.",
+    )
     return parser.parse_args(argv)
 
 
@@ -358,6 +403,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             learning_rate=args.lr,
             max_length=args.max_length,
             random_state=args.random_state,
+            group_column=args.group_column,
+            split_strategy=args.split_strategy,
         )
     except FileNotFoundError:
         return 2

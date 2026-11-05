@@ -7,12 +7,13 @@ This directory contains the source code for the **ScamShield AI Chrome Extension
 ## 1. Key Capabilities
 
 - **Single-Screen UI:** All primary features (Scan Current Page, Job Text Box, Check Pasted Text, and Screenshot Check) are accessible directly on the main screen without hidden dropdowns.
-- **100% Offline Local Inference (Default Mode):**
+- **Local Inference by Default:**
   - **In-Browser Rule Engine:** Executes pattern matching for upfront fees, credential requests, WhatsApp/Telegram redirection, and unrealistic salary offers locally in JavaScript.
   - **In-Browser TF-IDF + Logistic Regression Model:** Implements sublinear TF-IDF scoring and logistic regression classification in vanilla JavaScript. Model weights and vocabulary are automatically synchronized by `train_model.py`.
-  - Runs offline with zero network latency, zero external API calls, and zero CORS errors.
+  - Page and pasted-text checks run locally after the user starts a scan. They do not send listing text to the backend.
 - **Optional Backend API Connection:**
-  - Can connect to a local Flask backend (`http://127.0.0.1:5000`) or a deployed Google Cloud Run server for server-side Tesseract OCR screenshot extraction.
+  - Screenshot OCR sends the selected image to the configured backend only after a confirmation prompt. Remote backends must use HTTPS and require a per-origin browser permission.
+  - The model score is an experimental classifier signal, not a calibrated probability or a fraud verdict.
 - **Smart Portal Disclaimer Stripping:** Automatically removes safety banners added by platforms like Naukri, Internshala, Indeed, LinkedIn, and Foundit, preventing false triggers.
 
 ---
@@ -71,7 +72,10 @@ The extension follows the principle of least privilege:
 | :--- | :--- |
 | `activeTab` | Grants temporary access to the active browser tab only when the user explicitly clicks the extension or "Scan Current Page". |
 | `scripting` | Executes a lightweight DOM script to extract text from job posting pages. |
-| `host_permissions: ["<all_urls>"]` | Allows page scanning across any recruitment site, job board, or company career portal. |
+| Local backend host access | Allows screenshot OCR requests to the local Flask server. |
+| Optional HTTPS host access | Requested only for the specific remote backend origin selected by the user. |
+
+Page scanning uses `activeTab` and `scripting` after the user presses the scan button; the extension does not scan automatically when its popup opens.
 
 ---
 

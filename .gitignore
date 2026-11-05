@@ -25,6 +25,7 @@ data/*.parquet
 models/*.joblib
 models/*.pkl
 models/*.json
+!models/model_metadata.json
 models/distilbert_fake_job/
 !models/.gitkeep
 

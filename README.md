@@ -7,6 +7,8 @@ It combines a **transparent, modular rule-based risk engine**, an **explainable 
 > [!IMPORTANT]
 > **Core Epistemic & Safety Principle:** ScamShield AI never claims a job or internship offer is definitively fraudulent or guaranteed legitimate based solely on a machine learning score or pattern match. Rule-based warning evidence and statistical ML predictions are displayed separately, and every assessment provides actionable verification steps. **Zero generative AI or LLM APIs (such as Gemini, OpenAI, or Ollama) are used anywhere in the system.**
 
+> **Prototype model limitation:** The model is trained on a balanced historical dataset, not a representative sample of current job listings. Its scores are experimental and uncalibrated; they are warning signals, not fraud probabilities or definitive findings. See `data/DATASET_CARD.md` and `models/model_metadata.json` for dataset and evaluation details.
+
 ---
 
 ## 1. Architecture & Key Features
@@ -32,11 +34,12 @@ It combines a **transparent, modular rule-based risk engine**, an **explainable 
 - **Anti-Overfitting & Data Leakage Prevention:**
   - Sanitizes template noise tokens (e.g. `(Batch X)` tags) and deduplicates text records prior to splitting.
   - Stratified 80/20 train/test split applied **before** TF-IDF vectorizer fitting.
-  - 5-Fold Stratified Cross-Validation on the training split evaluates both F1-score and cross-validated log-loss to ensure well-calibrated, non-extreme probabilities.
+  - Group-isolated stratified train/test and cross-validation splits are the default. Supply a stable pseudonymous employer/source/campaign group column; random row splitting requires explicit exploratory opt-in.
+  - Reports confusion counts, precision/recall across several thresholds, PR-AUC, Brier score, log-loss, and calibration-bin diagnostics. Calibration diagnostics are descriptive and do not calibrate the model.
   - Automatically calculates and logs the **generalization gap** (`train_f1 - test_f1`) in `models/model_metadata.json`.
 - **Offline Extension Weight Synchronization:**
   - `train_model.py` automatically extracts vocabulary, IDF values, regression coefficients, and intercept directly into `extension/popup.js`.
-  - When model files are missing, the system explicitly reports `available: false` rather than fabricating predictions.
+  - The classifier output is an experimental score, not a calibrated fraud probability. When model files are missing, the system explicitly reports `available: false` rather than fabricating predictions.
 
 ### Tesseract OCR Screenshot Analysis (`scamshield/ocr_service.py`)
 - Extracts text from uploaded screenshot images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tiff`, max 5 MB).
@@ -47,9 +50,9 @@ It combines a **transparent, modular rule-based risk engine**, an **explainable 
 ### Manifest V3 Chrome Extension (`extension/`)
 - **Single-Screen UI:** All primary actions (Scan Current Page, Job Text Review Box, Check Pasted Text, and Screenshot Check) are directly visible on the main screen without hidden dropdowns.
 - **Dual-Mode Inference:**
-  - **In-Browser Local Engine (Default):** Runs the complete rule-based risk checks and the regularized TF-IDF + Logistic Regression model 100% locally in Chrome. Works offline with zero network latency and zero CORS configuration.
-  - **Backend API Mode (Optional):** Can connect to the local Flask backend (`http://127.0.0.1:5000`) or a deployed Google Cloud Run instance for full OCR and server-side analysis.
-- **Security & Privacy:** Uses `activeTab` and `chrome.scripting.executeScript` only on user click. Text is loaded into the editable box for review before analysis.
+  - **In-Browser Local Engine (Default):** Page and pasted-text analysis run locally in Chrome after the user starts a scan.
+  - **Backend API Mode (Optional):** Screenshot OCR sends the selected image to the configured local or remote backend only after a confirmation prompt. Remote backends must use HTTPS and require a per-origin browser permission.
+- **Security & Privacy:** Page text is not sent to the backend by the extension. Screenshot images are sent only after confirmation; use a backend you trust. The classifier score is experimental and is not a calibrated fraud probability.
 
 ---
 
@@ -59,13 +62,17 @@ It combines a **transparent, modular rule-based risk engine**, an **explainable 
 ScamShieldAI/
 ├── app.py                      # Flask REST API server & rate limiting
 ├── train_model.py              # ML training, CV hyperparameter tuning, & extension sync
+├── prepare_emscad_data.py      # Reproducible PII-pattern redaction and group-ID preparation
 ├── train_distilbert.py         # Optional DistilBERT transformer training & evaluation
 ├── requirements.txt            # Python dependencies (Flask, scikit-learn, pytesseract, etc.)
 ├── .env.example                # Environment variable configuration template
 ├── .gitignore                  # Git ignore rules (virtual environments, caches, datasets)
 ├── README.md                   # Complete system documentation
 ├── data/                       # Dataset directory (contains data/.gitkeep)
-│   └── fake_job_postings.csv   # Training dataset (120 unique balanced listings)
+│   ├── DATASET_CARD.md          # EMSCAD source, preparation, license, and limitations
+│   ├── DATASET_CARD_TEMPLATE.md # Provenance, labels, privacy, and reproducibility template
+│   ├── fake_job_postings.csv   # Small local research sample; ignored by Git
+│   └── fake_job_postings_emscad_prepared.manifest.json # Safe checksums and preparation counts
 ├── models/                     # Model artifacts (contains models/.gitkeep)
 │   ├── fake_job_model.joblib   # Fitted Scikit-learn TF-IDF + LogReg pipeline
 │   └── model_metadata.json     # Training metrics, CV scores, & generalization diagnostics
@@ -121,17 +128,20 @@ winget install --id UB-Mannheim.TesseractOCR
 
 ### Step 3: Train the Machine Learning Classifier
 
-To train or retrain the baseline model and synchronize the weights with the Chrome extension:
+The current research run uses a pinned, CC BY 4.0 attributed balanced subset of EMSCAD. The raw CSV and prepared listing text stay local and ignored by Git. Review `data/DATASET_CARD.md` before reproducing or redistributing derived artifacts. For stronger evaluation, replace the dataset with a larger, current, carefully reviewed collection containing stable employer/source/campaign IDs; do not use a unique listing ID such as `job_id` as the group.
 
 ```powershell
-python train_model.py --data-path data\fake_job_postings.csv --model-path models\fake_job_model.joblib --metadata-path models\model_metadata.json
+python prepare_emscad_data.py
+python train_model.py --data-path data\fake_job_postings_emscad_prepared.csv --group-column evaluation_group --model-path models\fake_job_model.joblib --metadata-path models\model_metadata.json
 ```
 
+The downloaded file contains 1,732 listings with 866 per label, although its dataset card states 1,730. Grouping uses repeated company-profile text as a proxy; rows with short or missing profiles fall back to unique row IDs. This is not a complete employer-isolated evaluation and is not evidence of production performance.
+
 Output highlights:
-- Evaluates 5-fold Stratified Cross-Validation on the training split.
-- Automatically selects the optimal regularized $C$ parameter.
-- Evaluates held-out test precision, recall, F1, and PR-AUC.
-- Verifies generalization gap (`train_f1 - test_f1 = 0.0000`).
+- Uses group-isolated cross-validation and a group-isolated holdout when a group column is supplied.
+- Reports false positives and false negatives at thresholds from 0.10 to 0.90.
+- Reports Brier score, log-loss, and reliability-bin diagnostics without presenting them as calibrated probabilities.
+- Writes the split strategy and group overlap status into the versionable model metadata.
 - Synchronizes model weights directly to `extension/popup.js`.
 
 ### Step 4: Run the Automated Test Suite
@@ -220,6 +230,7 @@ Analyzes raw text from a job advertisement or email offer.
     "predicted_class": "fraudulent_pattern_detected",
     "fraud_probability_score": 0.6855,
     "fraud_score_pct": 68.6,
+    "is_calibrated_probability": false,
     "model_version": "1.1.0-tfidf-regularized-logreg",
     "disclaimer": "Statistical ML predictions measure text similarity against historical training data and are NOT proof that a specific job offer is fraudulent or legitimate."
   },
@@ -270,19 +281,19 @@ gcloud run deploy scamshield-ai `
   --image gcr.io/YOUR_PROJECT_ID/scamshield-ai:1.1.0 `
   --platform managed `
   --region us-central1 `
-  --allow-unauthenticated `
+  --no-allow-unauthenticated `
   --memory 1Gi `
   --cpu 1 `
-  --set-env-vars "SCAMSHIELD_RATE_LIMIT_PER_MINUTE=60,SCAMSHIELD_MAX_TEXT_LENGTH=25000"
+  --set-env-vars "SCAMSHIELD_CORS_ORIGIN=chrome-extension://YOUR_EXTENSION_ID,SCAMSHIELD_RATE_LIMIT_PER_MINUTE=60,SCAMSHIELD_MAX_TEXT_LENGTH=25000"
 ```
 
-To connect the extension to your Cloud Run backend, click **Configure Backend Server URL** in the extension popup and input your Cloud Run HTTPS URL.
+This keeps Cloud Run private. For remote OCR from end-user browsers, place an authenticated API gateway in front of the service and enforce edge rate limits there. Do not expose this Flask app directly as an unauthenticated public API; the in-memory rate limiter is per-process only, and CORS is not authentication. Configure the exact extension ID in `SCAMSHIELD_CORS_ORIGIN`.
 
 ---
 
 ## 6. Security Guarantees & Privacy Principles
 
 - **Zero Generative AI:** Does not send user text or screenshots to LLM endpoints (OpenAI, Gemini, Ollama, etc.). Eliminates hallucinated facts, data leaks, and token costs.
-- **In-Memory Processing:** Submitted job descriptions and uploaded screenshots are analyzed strictly in volatile memory. No text or images are saved to disk, databases, or logs.
+- **Application Data Handling:** The application code does not write submitted listing text or images to its own database or files. Hosting providers can retain request metadata or operational logs; review and configure provider logging and retention before handling real user data.
 - **Explainable Assessments:** Every risk score is accompanied by the verbatim phrase that triggered it, so users can verify the evidence themselves.
 - **Empowerment Over Judgment:** ScamShield AI acts as an educational and triage tool, providing actionable verification steps rather than issuing unverifiable verdicts.

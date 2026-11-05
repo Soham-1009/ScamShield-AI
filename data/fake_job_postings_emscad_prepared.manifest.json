@@ -1,0 +1,42 @@
+{
+  "source_file": "fake_job_postings_emscad_balanced_en.csv",
+  "source_sha256": "0df4b46d0c5d1ac8272aaa10e480141d8e02f57196ae57db6041bacb074792c4",
+  "prepared_file": "fake_job_postings_emscad_prepared.csv",
+  "prepared_sha256": "83658bb2c7508e86915044273a96d4653ac5ea94d90ab5da5fb9335f1fdac78e",
+  "rows": 1732,
+  "label_counts": {
+    "0": 866,
+    "1": 866
+  },
+  "group_column": "evaluation_group",
+  "group_method": "SHA-256 of normalized company_profile when length >= 40; otherwise unique job_id hash",
+  "rows_using_row_fallback": 720,
+  "unique_profile_groups": 431,
+  "pii_pattern_redactions": {
+    "title": {
+      "emails": 0,
+      "phone_like": 0
+    },
+    "company_profile": {
+      "emails": 0,
+      "phone_like": 26
+    },
+    "description": {
+      "emails": 0,
+      "phone_like": 129
+    },
+    "requirements": {
+      "emails": 0,
+      "phone_like": 37
+    },
+    "benefits": {
+      "emails": 0,
+      "phone_like": 17
+    }
+  },
+  "limitations": [
+    "company_profile-derived groups are a proxy and are not verified employer IDs",
+    "rows with blank or short company profiles use unique row groups and are not employer-isolated",
+    "source subset is balanced and historically collected; it does not represent current scam prevalence"
+  ]
+}

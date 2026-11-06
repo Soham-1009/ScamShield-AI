@@ -62,10 +62,18 @@ ALLOWED_ORIGIN_PATTERNS = [
 class SlidingWindowRateLimiter:
     """Thread-safe, bounded in-memory per-IP sliding-window rate limiter."""
 
-    def __init__(self, max_requests: int = DEFAULT_RATE_LIMIT_PER_MINUTE, window_seconds: float = 60.0) -> None:
+    def __init__(
+        self,
+        max_requests: int = DEFAULT_RATE_LIMIT_PER_MINUTE,
+        window_seconds: float = 60.0,
+        max_clients: int = 10_000,
+    ) -> None:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        self._requests: Dict[str, Deque[float]] = collections.defaultdict(collections.deque)
+        self.max_clients = max(1, max_clients)
+        self._requests: collections.OrderedDict[str, Deque[float]] = collections.OrderedDict()
+        self._calls_since_sweep = 0
+        self._last_sweep_at = 0.0
         self._lock = threading.Lock()
 
     def is_allowed(self, client_key: str) -> Tuple[bool, int]:
@@ -77,13 +85,29 @@ class SlidingWindowRateLimiter:
         cutoff = now - self.window_seconds
 
         with self._lock:
-            # Sweep stale entries when dictionary grows to prevent unbounded memory growth
-            if len(self._requests) > 1000:
+            # Periodic cleanup avoids scanning every tracked client on each request.
+            self._calls_since_sweep += 1
+            should_sweep = self._calls_since_sweep >= 256 or (
+                len(self._requests) > 1000 and now - self._last_sweep_at >= 1.0
+            )
+            if should_sweep:
                 stale_keys = [k for k, dq in self._requests.items() if not dq or dq[-1] <= cutoff]
                 for k in stale_keys:
                     del self._requests[k]
+                self._calls_since_sweep = 0
+                self._last_sweep_at = now
 
-            dq = self._requests[client_key]
+            dq = self._requests.get(client_key)
+            if dq is None:
+                # Cap memory when clients rotate source addresses. Evict the least
+                # recently seen key when the bounded table is full.
+                if len(self._requests) >= self.max_clients:
+                    self._requests.popitem(last=False)
+                dq = collections.deque()
+                self._requests[client_key] = dq
+            else:
+                self._requests.move_to_end(client_key)
+
             while dq and dq[0] <= cutoff:
                 dq.popleft()
 
@@ -113,7 +137,23 @@ def _build_analysis_response(
     triggered_rules = rule_evaluation["triggered_rules"]
     exact_phrases = rule_evaluation["exact_matched_phrases"]
 
-    ml_prediction = ml_detector.predict(job_text)
+    if ml_detector.is_available and word_count < 20:
+        ml_prediction = {
+            "available": False,
+            "insufficient_text": True,
+            "model_loaded": True,
+            "predicted_label": None,
+            "predicted_class": None,
+            "fraud_probability_score": None,
+            "fraud_score_pct": None,
+            "is_calibrated_probability": False,
+            "model_version": None,
+            "metadata": None,
+            "disclaimer": "A short excerpt is not enough context for a useful statistical model signal.",
+            "status_message": "ML scoring withheld because fewer than 20 words were submitted.",
+        }
+    else:
+        ml_prediction = ml_detector.predict(job_text)
     experimental_triage = compute_experimental_triage_score(rule_assessment, ml_prediction)
 
     explanation = explanation_service.generate_explanation(
@@ -126,7 +166,11 @@ def _build_analysis_response(
         "Risk assessments are automated estimates and cannot definitively prove whether an offer is fraudulent or legitimate.",
         "The absence of triggered warning rules does not confirm that an employer or job offer is genuine.",
     ]
-    if not ml_prediction.get("available"):
+    if ml_prediction.get("insufficient_text"):
+        limitations.append(
+            "Text is brief (< 20 words); the ML score was withheld because the excerpt lacks context."
+        )
+    elif not ml_prediction.get("available"):
         limitations.append(
             "Trained ML model is not currently loaded; analysis reflects rule-based detection only."
         )
@@ -269,6 +313,20 @@ def create_app(
                 }
             ),
             405,
+        )
+
+    @app.errorhandler(500)
+    def handle_internal_server_error(_err: Any) -> Any:
+        # Keep API errors machine-readable without exposing exception details or paths.
+        return make_response(
+            jsonify(
+                {
+                    "error": "INTERNAL_SERVER_ERROR",
+                    "message": "The request could not be completed due to an internal server error.",
+                    "status_code": 500,
+                }
+            ),
+            500,
         )
 
     @app.route("/", methods=["GET", "OPTIONS"])
@@ -429,6 +487,8 @@ def create_app(
             ocr_data = ocr_service.extract_text_from_image(pil_image)
         except OCRError as exc:
             return make_response(jsonify(exc.to_dict()), exc.status_code)
+        finally:
+            pil_image.close()
 
         try:
             cleaned_text, char_count, word_count = validate_job_text(

@@ -33,8 +33,7 @@ It combines a **transparent, modular rule-based risk engine**, an **explainable 
 - **Pipeline:** `Pipeline(TfidfVectorizer(max_features=5000, ngram_range=(1, 2), sublinear_tf=True), LogisticRegression(C=1.0, class_weight="balanced"))`.
 - **Anti-Overfitting & Data Leakage Prevention:**
   - Sanitizes template noise tokens (e.g. `(Batch X)` tags) and deduplicates text records prior to splitting.
-  - Stratified 80/20 train/test split applied **before** TF-IDF vectorizer fitting.
-  - Group-isolated stratified train/test and cross-validation splits are the default. Supply a stable pseudonymous employer/source/campaign group column; random row splitting requires explicit exploratory opt-in.
+  - An approximate group-stratified 80/20 holdout and grouped cross-validation are the default, applied **before** TF-IDF fitting. Supply a stable pseudonymous employer/source/campaign group column; random row splitting requires explicit exploratory opt-in.
   - Reports confusion counts, precision/recall across several thresholds, PR-AUC, Brier score, log-loss, and calibration-bin diagnostics. Calibration diagnostics are descriptive and do not calibrate the model.
   - Automatically calculates and logs the **generalization gap** (`train_f1 - test_f1`) in `models/model_metadata.json`.
 - **Offline Extension Weight Synchronization:**
@@ -45,7 +44,7 @@ It combines a **transparent, modular rule-based risk engine**, an **explainable 
 - Extracts text from uploaded screenshot images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tiff`, max 5 MB).
 - Automatic discovery of Tesseract executables across standard Windows paths (`C:\Program Files\Tesseract-OCR\tesseract.exe`, `C:\Program Files (x86)\Tesseract-OCR\tesseract.exe`, `LOCALAPPDATA\Programs\Tesseract-OCR\tesseract.exe`) or via custom `TESSERACT_CMD`.
 - Decompression bomb safety guard (`MAX_IMAGE_PIXELS = 25_000_000`).
-- Image preprocessing (grayscale, Otsu thresholding, contrast enhancement) for reliable extraction from chat app screenshots and email offer letters.
+- Image preprocessing converts screenshots to grayscale and upscales only small images; OCR has a configurable timeout and pixel limits.
 
 ### Manifest V3 Chrome Extension (`extension/`)
 - **Single-Screen UI:** All primary actions (Scan Current Page, Job Text Review Box, Check Pasted Text, and Screenshot Check) are directly visible on the main screen without hidden dropdowns.
@@ -68,9 +67,12 @@ ScamShieldAI/
 ├── .env.example                # Environment variable configuration template
 ├── .gitignore                  # Git ignore rules (virtual environments, caches, datasets)
 ├── README.md                   # Complete system documentation
-├── data/                       # Dataset directory (contains data/.gitkeep)
+├── PRIVACY_AND_OPERATIONS.md   # Data-flow, privacy, deployment, and incident checklist
+├── data/                       # Local datasets and evaluation protocol
 │   ├── DATASET_CARD.md          # EMSCAD source, preparation, license, and limitations
 │   ├── DATASET_CARD_TEMPLATE.md # Provenance, labels, privacy, and reproducibility template
+│   ├── EVALUATION_PROTOCOL.md   # Label review, leakage control, metrics, and release gate
+│   ├── evaluation_template.csv # Empty annotation schema; not training data
 │   ├── fake_job_postings.csv   # Small local research sample; ignored by Git
 │   └── fake_job_postings_emscad_prepared.manifest.json # Safe checksums and preparation counts
 ├── models/                     # Model artifacts (contains models/.gitkeep)
@@ -129,6 +131,8 @@ winget install --id UB-Mannheim.TesseractOCR
 ### Step 3: Train the Machine Learning Classifier
 
 The current research run uses a pinned, CC BY 4.0 attributed balanced subset of EMSCAD. The raw CSV and prepared listing text stay local and ignored by Git. Review `data/DATASET_CARD.md` before reproducing or redistributing derived artifacts. For stronger evaluation, replace the dataset with a larger, current, carefully reviewed collection containing stable employer/source/campaign IDs; do not use a unique listing ID such as `job_id` as the group.
+
+Use [`data/EVALUATION_PROTOCOL.md`](data/EVALUATION_PROTOCOL.md) for collection, double-review labeling, grouping, split isolation, evaluation reporting, and release gates. The bundled dataset is not a deployment validation set; if a reviewed representative set is unavailable, report the result as inconclusive and keep the classifier experimental.
 
 ```powershell
 python prepare_emscad_data.py
@@ -293,7 +297,9 @@ This keeps Cloud Run private. For remote OCR from end-user browsers, place an au
 
 ## 6. Security Guarantees & Privacy Principles
 
-- **Zero Generative AI:** Does not send user text or screenshots to LLM endpoints (OpenAI, Gemini, Ollama, etc.). Eliminates hallucinated facts, data leaks, and token costs.
+See [`PRIVACY_AND_OPERATIONS.md`](PRIVACY_AND_OPERATIONS.md) for the data-flow notice, privacy review, operational safeguards, model change log, and incident-reporting checklist.
+
+- **No Generative AI Endpoints:** User text and screenshots are not sent to LLM APIs. This reduces external data sharing and token costs, but does not by itself guarantee privacy or eliminate every data-leak risk.
 - **Application Data Handling:** The application code does not write submitted listing text or images to its own database or files. Hosting providers can retain request metadata or operational logs; review and configure provider logging and retention before handling real user data.
-- **Explainable Assessments:** Every risk score is accompanied by the verbatim phrase that triggered it, so users can verify the evidence themselves.
+- **Evidence-Led Assessments:** Triggered rules show matched wording and surrounding context. A zero rule score means no configured rule matched; it is not a finding that a listing is safe. Extraction gaps are surfaced for manual review.
 - **Empowerment Over Judgment:** ScamShield AI acts as an educational and triage tool, providing actionable verification steps rather than issuing unverifiable verdicts.

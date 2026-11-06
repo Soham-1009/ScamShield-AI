@@ -58,6 +58,7 @@ STANDARD_TESSERACT_PATHS = [
     "/usr/local/bin/tesseract",
     "/opt/homebrew/bin/tesseract",
 ]
+DEFAULT_OCR_TIMEOUT_SECONDS = int(os.environ.get("SCAMSHIELD_OCR_TIMEOUT_SECONDS", "30"))
 
 
 class OCRService:
@@ -67,6 +68,7 @@ class OCRService:
 
     def __init__(self, tesseract_cmd: Optional[str] = None) -> None:
         self.tesseract_cmd = tesseract_cmd or os.environ.get("TESSERACT_CMD")
+        self.timeout_seconds = min(120, max(1, DEFAULT_OCR_TIMEOUT_SECONDS))
 
     def _configure_pytesseract(self) -> Any:
         try:
@@ -124,12 +126,12 @@ class OCRService:
                 "version": None,
                 "status_message": exc.message,
             }
-        except Exception as exc:
+        except Exception:
             return {
                 "available": False,
                 "engine": "tesseract",
                 "version": None,
-                "status_message": f"Tesseract OCR unavailable: {exc}",
+                "status_message": "Tesseract OCR is unavailable because of a server configuration or execution error.",
             }
 
     def extract_text_from_image(self, image: Image.Image) -> Dict[str, Any]:
@@ -141,15 +143,33 @@ class OCRService:
         """
         pytesseract = self._configure_pytesseract()
 
+        processed: Optional[Image.Image] = None
+        grayscale: Optional[Image.Image] = None
         try:
             # Convert to RGB/grayscale and upscale low-resolution screenshots for better character segmentation
             processed = image.convert("RGB")
             grayscale = ImageOps.grayscale(processed)
             width, height = grayscale.size
-            if height < 400 or width < 600:
+            # Doubling both dimensions quadruples pixel memory. Only upscale
+            # genuinely small images so an allowed 25 MP input stays bounded.
+            if (height < 400 or width < 600) and width * height <= 6_250_000:
                 resample_filter = getattr(Image, "Resampling", Image).BICUBIC
-                grayscale = grayscale.resize((width * 2, height * 2), resample=resample_filter)
-            raw_text = pytesseract.image_to_string(grayscale)
+                upscaled = grayscale.resize((width * 2, height * 2), resample=resample_filter)
+                grayscale.close()
+                grayscale = upscaled
+            raw_text = pytesseract.image_to_string(grayscale, timeout=self.timeout_seconds)
+        except RuntimeError as exc:
+            if "timeout" in str(exc).lower():
+                raise OCRError(
+                    "OCR exceeded the processing time limit. Try a smaller or clearer screenshot.",
+                    status_code=504,
+                    error_code="OCR_TIMEOUT",
+                ) from exc
+            raise OCRError(
+                "OCR could not process the uploaded image. Try a clearer screenshot or paste the text manually.",
+                status_code=422,
+                error_code="OCR_PROCESSING_FAILED",
+            ) from exc
         except Exception as exc:
             msg = str(exc)
             if "not installed" in msg.lower() or "not in your path" in msg.lower():
@@ -159,10 +179,15 @@ class OCRService:
                     error_code="TESSERACT_NOT_INSTALLED",
                 ) from exc
             raise OCRError(
-                f"Failed to run OCR on the uploaded image: {msg}",
+                "OCR could not process the uploaded image. Try a clearer screenshot or paste the text manually.",
                 status_code=422,
                 error_code="OCR_PROCESSING_FAILED",
             ) from exc
+        finally:
+            if grayscale is not None:
+                grayscale.close()
+            if processed is not None:
+                processed.close()
 
         cleaned_text = sanitize_text(raw_text or "")
         if not cleaned_text or len(cleaned_text) < 10:

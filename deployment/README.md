@@ -24,6 +24,7 @@ The Docker container is built on `python:3.11-slim` and includes:
 | `SCAMSHIELD_RATE_LIMIT_PER_MINUTE` | `60` | Sliding window rate limit per client IP address. |
 | `SCAMSHIELD_CORS_ORIGIN` | unset | Exact production Chrome extension origin to allow. CORS is not authentication. |
 | `SCAMSHIELD_MAX_TEXT_LENGTH` | `25000` | Maximum character length for job description analysis. |
+| `SCAMSHIELD_OCR_TIMEOUT_SECONDS` | `30` | Maximum time allowed for one screenshot OCR operation. |
 | `SCAMSHIELD_MODEL_PATH` | `models/fake_job_model.joblib` | Path to fitted Scikit-learn Joblib pipeline. |
 | `SCAMSHIELD_MODEL_METADATA_PATH` | `models/model_metadata.json` | Path to model metadata and diagnostics JSON. |
 | `TESSERACT_CMD` | System PATH | Explicit binary path for Tesseract OCR executable. |

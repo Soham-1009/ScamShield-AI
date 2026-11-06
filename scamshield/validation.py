@@ -145,9 +145,9 @@ def validate_source_url(url: Any, max_length: int = DEFAULT_MAX_URL_LENGTH) -> O
     if not cleaned_url:
         return None
 
-    if "\r" in cleaned_url or "\n" in cleaned_url or CONTROL_CHAR_PATTERN.search(cleaned_url):
+    if any(char.isspace() for char in cleaned_url) or CONTROL_CHAR_PATTERN.search(cleaned_url):
         raise ValidationError(
-            "Field 'source_url' must not contain line breaks or non-printable control characters.",
+            "Field 'source_url' must not contain whitespace or non-printable control characters.",
             status_code=400,
             error_code="INVALID_URL_FORMAT",
         )
@@ -161,11 +161,27 @@ def validate_source_url(url: Any, max_length: int = DEFAULT_MAX_URL_LENGTH) -> O
 
     parsed = urlparse(cleaned_url)
     scheme = (parsed.scheme or "").lower()
-    if scheme not in ALLOWED_URL_SCHEMES or not parsed.netloc:
+    try:
+        hostname = parsed.hostname
+        _ = parsed.port  # Access validates that a supplied port is numeric and in range.
+    except ValueError as exc:
+        raise ValidationError(
+            "Field 'source_url' contains an invalid host or port.",
+            status_code=400,
+            error_code="INVALID_URL_FORMAT",
+        ) from exc
+
+    if scheme not in ALLOWED_URL_SCHEMES or not parsed.netloc or not hostname:
         raise ValidationError(
             "Field 'source_url' must be a valid HTTP or HTTPS URL (e.g., https://example.com/jobs/123).",
             status_code=400,
             error_code="INVALID_URL_SCHEME",
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValidationError(
+            "Field 'source_url' must not include embedded username or password credentials.",
+            status_code=400,
+            error_code="INVALID_URL_FORMAT",
         )
 
     return cleaned_url
@@ -294,6 +310,12 @@ def validate_uploaded_image(
         image.load()
     except ValidationError:
         raise
+    except Image.DecompressionBombError as exc:
+        raise ValidationError(
+            "The uploaded image exceeds safe pixel limits.",
+            status_code=413,
+            error_code="INVALID_IMAGE_DIMENSIONS",
+        ) from exc
     except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as exc:
         raise ValidationError(
             "The uploaded file could not be read as a valid image. Please upload a clear PNG, JPG, or WEBP screenshot.",

@@ -122,14 +122,29 @@ class DeterministicExplanationService:
         if ml_prediction and ml_prediction.get("available"):
             ml_score_pct = ml_prediction.get("fraud_score_pct")
             ml_class = ml_prediction.get("predicted_class")
+            score_description = (
+                f" with a statistical score of {ml_score_pct}%"
+                if ml_score_pct is not None
+                else " without a probability-like score"
+            )
             general_risk_indicators.append(
                 {
                     "indicator_type": "statistical_ml_comparison",
                     "description": (
                         f"Statistical TF-IDF + Logistic Regression classifier returned class "
-                        f"'{ml_class}' with a fraud-class similarity score of {ml_score_pct}%. "
+                        f"'{ml_class}'{score_description}. "
                         "This score reflects vocabulary similarity to historical dataset examples "
                         "and is not standalone evidence of fraud."
+                    ),
+                }
+            )
+        elif ml_prediction and ml_prediction.get("insufficient_text"):
+            general_risk_indicators.append(
+                {
+                    "indicator_type": "ml_score_withheld_for_limited_text",
+                    "description": (
+                        "The text is too brief for the statistical model to produce a useful signal. "
+                        "Provide the full job listing; no model score was generated."
                     ),
                 }
             )

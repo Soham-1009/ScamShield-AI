@@ -403,6 +403,26 @@ body {
   color: var(--navy);
 }
 
+.coverage-panel {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text-sub);
+  line-height: 1.45;
+}
+
+.coverage-panel:empty {
+  display: none;
+}
+
+.coverage-title {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--navy);
+  font-weight: 700;
+}
+
 .tiny-note {
   font-size: 10.5px;
   color: var(--text-muted);

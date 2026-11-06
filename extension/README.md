@@ -14,6 +14,9 @@ This directory contains the source code for the **ScamShield AI Chrome Extension
 - **Optional Backend API Connection:**
   - Screenshot OCR sends the selected image to the configured backend only after a confirmation prompt. Remote backends must use HTTPS and require a per-origin browser permission.
   - The model score is an experimental classifier signal, not a calibrated probability or a fraud verdict.
+- Rule scores count only configured rule matches. A zero score means no configured rule matched; it does not mean the listing is safe.
+- Page scans show which key fields were captured. Missing title, employer, or description data is shown as **Not Enough Information** when no rule evidence was found. Screenshot OCR always needs a manual comparison with the source image.
+- Rule findings show matched wording and surrounding context. Compensation cautions such as an unpaid role prompt verification and do not independently indicate fraud.
 - **Smart Portal Disclaimer Stripping:** Automatically removes safety banners added by platforms like Naukri, Internshala, Indeed, LinkedIn, and Foundit, preventing false triggers.
 
 ---
@@ -50,17 +53,16 @@ extension/
 ### Method A: Scan Current Page
 1. Navigate to any job post on LinkedIn, Indeed, Naukri, or Internshala.
 2. Click the **ScamShield AI** icon in your toolbar.
-3. Click **Scan Current Page**.
-4. The extension extracts the job text from the page and places it into the review box so you can review what is being evaluated.
-5. Click **Analyze Job Text** to see the assessment.
+3. Click **Scan & Check This Job Page**.
+4. Review the extracted text and assessment. The extension may capture only the description on some sites; confirm the title, employer, and terms are included before relying on the result.
 
 ### Method B: Paste Job Description
 1. Copy text from an email offer, messaging conversation, or job board.
-2. Open the extension popup, paste into the text box, and click **Analyze Job Text**.
+2. Open the extension popup, paste into the text box, and click **Check Pasted Text**.
 
 ### Method C: Check Screenshot (OCR)
-1. If you have an image or screenshot of a chat or letter, drag and drop it into the screenshot area.
-2. If the local backend or Cloud Run server is running, Tesseract OCR will extract the text and run a full evaluation.
+1. Choose a PNG, JPG, or WebP image with the file picker.
+2. Click **Send Screenshot for OCR** and confirm the destination. Tesseract OCR extracts the text and runs the assessment if the backend is available. Remote backends must use HTTPS; compare the extracted text with the image because OCR can miss or alter wording.
 
 ---
 

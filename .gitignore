@@ -20,6 +20,7 @@ data/*.csv
 data/*.tsv
 data/*.parquet
 !data/.gitkeep
+!data/evaluation_template.csv
 
 # Generated ML model artifacts & evaluation outputs (keep models/.gitkeep)
 models/*.joblib

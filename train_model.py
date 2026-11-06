@@ -32,6 +32,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -67,6 +68,8 @@ def make_holdout_indices(
     split_strategy: str,
 ) -> Tuple[List[int], List[int]]:
     """Create a group-isolated holdout by default; random splitting is explicit opt-in."""
+    if not math.isfinite(test_size) or not 0.05 <= test_size <= 0.50:
+        raise ValueError("test_size must be between 0.05 and 0.50 for a meaningful holdout.")
     from sklearn.model_selection import StratifiedGroupKFold, train_test_split  # type: ignore
 
     indices = list(range(len(labels)))
@@ -85,7 +88,7 @@ def make_holdout_indices(
             "or explicitly use --split-strategy random for exploratory runs only."
         )
 
-    folds = max(2, min(10, round(1.0 / test_size)))
+    folds = max(2, min(20, round(1.0 / test_size)))
     groups_by_label = {
         label: {groups[i] for i, target in enumerate(labels) if target == label}
         for label in (0, 1)
@@ -400,6 +403,13 @@ def train_and_evaluate(
     Execute the end-to-end training, hyperparameter regularization tuning,
     and generalization diagnostic pipeline without data leakage.
     """
+    if max_features < 1:
+        raise ValueError("max_features must be at least 1.")
+    if not c_candidates or any(
+        not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0
+        for value in c_candidates
+    ):
+        raise ValueError("Every regularization candidate C must be a finite positive number.")
     df = load_and_validate_dataset(csv_path)
 
     try:
@@ -692,13 +702,25 @@ def train_and_evaluate(
         ],
     }
 
-    with open(metadata_output_path, "w", encoding="utf-8") as fh:
-        json.dump(metadata, fh, indent=2)
-
-    # Sync to Chrome extension if path provided or default exists
+    # Record whether the extension weights were actually updated. A successful
+    # Python model fit must not silently leave stale in-browser weights behind.
     target_js_path = popup_js_path or Path(DEFAULT_POPUP_JS_PATH)
     if target_js_path.exists():
-        export_model_to_extension_js(pipeline, target_js_path)
+        synced = export_model_to_extension_js(pipeline, target_js_path)
+        metadata["extension_sync"] = {
+            "status": "synced" if synced else "failed",
+            "target_file": target_js_path.name,
+        }
+        if not synced:
+            print(
+                f"[ScamShield AI] Warning: Model trained, but extension weights were not updated at {target_js_path}.",
+                file=sys.stderr,
+            )
+    else:
+        metadata["extension_sync"] = {"status": "target_not_found", "target_file": target_js_path.name}
+
+    with open(metadata_output_path, "w", encoding="utf-8") as fh:
+        json.dump(metadata, fh, indent=2)
 
     return metadata
 
@@ -737,7 +759,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--test-size",
         type=float,
         default=0.20,
-        help="Proportion of dataset reserved for stratified test split (default: 0.20).",
+        help="Approximate holdout proportion (0.05 to 0.50; default: 0.20).",
     )
     parser.add_argument(
         "--random-state",

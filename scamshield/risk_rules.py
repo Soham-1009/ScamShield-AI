@@ -259,6 +259,25 @@ DEFAULT_RISK_RULES: List[RiskRule] = [
             "corporate email address, and cross-check the recruiter's identity on the company's official website."
         ),
     ),
+    RiskRule(
+        rule_id="RULE_UNPAID_OR_NO_STIPEND",
+        category="Compensation Terms to Review",
+        category_slug="compensation_terms",
+        severity="low",
+        weight=10,
+        patterns=[
+            r"\b(?:unpaid|without\s+(?:a\s+)?stipend|no\s+(?:stipend|compensation|salary)|zero\s+stipend)\b",
+        ],
+        explanation=(
+            "The listing describes the role as unpaid or without a stipend. This alone does not establish "
+            "fraud, but applicants should confirm the written compensation, work hours, duration, and "
+            "supervision before accepting."
+        ),
+        verification_step=(
+            "Ask the employer to confirm all compensation and work terms in writing, and check the rules "
+            "that apply to internships in your location. Never pay a fee to secure an unpaid role."
+        ),
+    ),
 ]
 
 
@@ -404,16 +423,24 @@ def compute_experimental_triage_score(
     )
 
     if not ml_available or ml_prob is None:
+        insufficient_text = bool(ml_result.get("insufficient_text", False))
         return {
             "available": False,
             "score": None,
-            "label": "Unavailable (Requires Trained ML Model)",
+            "label": (
+                "Unavailable (Insufficient Text Context)"
+                if insufficient_text
+                else "Unavailable (Requires Trained ML Model)"
+            ),
             "formula": formula_doc,
             "weights": {"rule_engine": 0.65, "ml_classifier": 0.35},
             "is_experimental": True,
             "is_calibrated_probability": False,
             "explanation": (
-                "Experimental combined triage score is not computed because no trained ML model is "
+                "Experimental combined triage score is withheld because the submitted text is too brief. "
+                "Provide the full listing for a contextual model signal."
+                if insufficient_text
+                else "Experimental combined triage score is not computed because no trained ML model is "
                 "currently loaded. Refer directly to the Rule-Based Assessment above."
             ),
         }

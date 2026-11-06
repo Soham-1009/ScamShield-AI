@@ -125,6 +125,16 @@
       ],
       reason: "Asks you to interview or apply only through WhatsApp or Telegram instead of official company email.",
       action: "Ask the recruiter to email you from their official company domain."
+    },
+    {
+      id: "RULE_UNPAID_OR_NO_STIPEND",
+      severity: "low",
+      weight: 10,
+      patterns: [
+        /\b(?:unpaid|without\s+(?:a\s+)?stipend|no\s+(?:stipend|compensation|salary)|zero\s+stipend)\b/gi
+      ],
+      reason: "The role is listed as unpaid or without a stipend. This alone does not prove fraud, but the full work and compensation terms deserve checking.",
+      action: "Get compensation, hours, duration, and supervision in writing; check local internship rules and never pay a fee."
     }
   ];
 
@@ -265,11 +275,14 @@
   const riskScorePill = document.getElementById("risk-score-pill");
   const riskOneLiner = document.getElementById("risk-one-liner");
   const mlScoreText = document.getElementById("ml-score-text");
+  const coveragePanel = document.getElementById("coverage-panel");
   const flagsSection = document.getElementById("flags-section");
   const flagsList = document.getElementById("flags-list");
   const actionsList = document.getElementById("actions-list");
 
   function showError(title, msg) {
+    // A failed new scan must not leave a previous listing's assessment visible.
+    resultsView.classList.add("hidden");
     errorTitle.textContent = title;
     errorMessage.textContent = msg;
     errorState.classList.remove("hidden");
@@ -279,7 +292,58 @@
     errorState.classList.add("hidden");
   }
 
-  function analyzeAndRender(rawText) {
+  function renderCoverage(coverage) {
+    coveragePanel.replaceChildren();
+    const title = document.createElement("strong");
+    title.className = "coverage-title";
+
+    if (!coverage || !coverage.fields) {
+      title.textContent = coverage && coverage.source === "ocr"
+        ? "Screenshot OCR — review the extracted text"
+        : "Listing field coverage not checked";
+      coveragePanel.append(title, document.createTextNode(
+        coverage && coverage.note
+          ? coverage.note
+          : "Verify the title, employer, compensation, full description, and contact details against the source listing."
+      ));
+      return Boolean(coverage && coverage.source === "ocr" && coverage.incomplete);
+    }
+
+    const labels = {
+      title: "Title",
+      employer: "Employer",
+      compensation: "Compensation",
+      description: "Description",
+      contact: "Contact details"
+    };
+    const details = coverage.details || {};
+    const fields = Object.entries(labels).map(([key, label]) => {
+      let status = coverage.fields[key] ? "captured" : "not found";
+      if (key === "description" && !coverage.fields.description) {
+        status = details.descriptionLength ? "too short" : "not located";
+      }
+      return `${label}: ${status}`;
+    });
+    const incomplete = ["title", "employer", "description"].some((key) => !coverage.fields[key]);
+    title.textContent = incomplete ? "Not enough information — extraction may be incomplete" : "Listing field coverage";
+    coveragePanel.append(title, document.createTextNode(fields.join(" · ")));
+    if (details.title || details.employer || details.compensation) {
+      const detailLine = document.createElement("div");
+      detailLine.textContent = [
+        details.title && `Title: ${details.title}`,
+        details.employer && `Employer: ${details.employer}`,
+        details.compensation && `Compensation text: ${details.compensation}`,
+        details.descriptionLength && `Description: ${details.descriptionLength} characters, ${details.descriptionWordCount || 0} words`
+      ].filter(Boolean).join(" · ");
+      coveragePanel.appendChild(detailLine);
+    }
+    const verifyLine = document.createElement("div");
+    verifyLine.textContent = "Compare these details with the source page, including any conflicting employer names or terms.";
+    coveragePanel.appendChild(verifyLine);
+    return incomplete;
+  }
+
+  function analyzeAndRender(rawText, coverage = null) {
     const trimmed = (rawText || "").trim();
     if (trimmed.length < 10) {
       showError("Text Too Short", "Open a job listing page or paste at least one sentence of the job offer.");
@@ -289,10 +353,12 @@
     hideError();
     const cleaned = trimmed.replace(PORTAL_DISCLAIMER_REGEX, " ").trim();
     const words = cleaned.split(/\s+/).filter(Boolean).length;
+    const extractionIncomplete = renderCoverage(coverage);
 
     const triggered = [];
     let rawScore = 0;
     let hasHigh = false;
+    let hasMedium = false;
 
     for (const rule of LOCAL_RULES) {
       const matches = [];
@@ -311,29 +377,38 @@
       if (matches.length > 0) {
         rawScore += rule.weight;
         if (rule.severity === "high") hasHigh = true;
+        if (rule.severity === "medium") hasMedium = true;
         triggered.push({ ...rule, matches });
       }
     }
 
     const score = Math.min(100, rawScore);
-    const mlSignal = computeMlSignalScore(cleaned);
+    // The classifier needs enough context; a tiny snippet can produce a strong
+    // looking but unstable score from only one or two learned tokens.
+    const mlSignal = words >= 20 ? computeMlSignalScore(cleaned) : null;
 
     let level = "low";
     let headline = "No Configured Warning Signals Found";
     let oneLiner = "No configured warning patterns matched this text. Verify the company independently before sharing information.";
 
-    if (triggered.length === 0 && words < 20) {
+    if (triggered.length === 0 && (words < 20 || extractionIncomplete)) {
       level = "low";
-      headline = "Not Enough Text";
-      oneLiner = "This snippet is very short. Paste the full job description for a better check.";
+      headline = extractionIncomplete && words >= 20 ? "Not Enough Information" : "Not Enough Text";
+      oneLiner = extractionIncomplete && words >= 20
+        ? "Some key listing fields were not captured. Verify the employer and full listing before relying on this result."
+        : "This snippet is very short. Paste the full job description for a better check.";
     } else if (hasHigh || score >= 50) {
       level = "high";
       headline = "Multiple Warning Signals Detected";
       oneLiner = `Found ${triggered.length} serious warning sign(s). Do not pay money or send private IDs.`;
-    } else if (triggered.length > 0) {
+    } else if (hasMedium || score >= 25) {
       level = "medium";
       headline = "Warning Signals Detected";
       oneLiner = `Found ${triggered.length} warning sign(s). Verify the company name and website before applying.`;
+    } else if (triggered.length > 0) {
+      level = "low";
+      headline = "Review Listing Terms";
+      oneLiner = `Found ${triggered.length} caution signal(s). These do not prove fraud; verify the written terms before proceeding.`;
     }
 
     resultsView.classList.remove("hidden");
@@ -344,7 +419,7 @@
     riskScorePill.className = `score-pill pill-${level}`;
     riskOneLiner.textContent = oneLiner;
     mlScoreText.textContent = mlSignal === null
-      ? "Insufficient matching text for a model signal."
+      ? "Insufficient text for a model signal; paste the full job description."
       : `${mlSignal}/100 classifier signal (experimental; not a fraud probability).`;
 
     flagsList.innerHTML = "";
@@ -405,6 +480,7 @@
 
   async function scanAndCheckCurrentPage() {
     hideError();
+    resultsView.classList.add("hidden");
     if (typeof chrome === "undefined" || !chrome.tabs || !chrome.scripting) {
       showError("Paste Text Above", "Tab scanning is only available inside the Chrome extension.");
       return;
@@ -433,15 +509,34 @@
       const injection = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: () => {
+          const normalize = (value) => (value || "").replace(/\s+/g, " ").trim();
+          const heading = document.querySelector("h1");
+          const titleText = normalize(heading && heading.innerText);
+          let summaryText = "";
+          let summaryElement = null;
+          if (heading && titleText) {
+            let ancestor = heading;
+            for (let depth = 0; depth < 7 && ancestor; depth++, ancestor = ancestor.parentElement) {
+              const candidate = normalize(ancestor.innerText);
+              if (candidate.length > 1800) break;
+              const hasListingMetadata = /\b(?:unpaid|paid|stipend|salary|duration|location|openings|applicants|internship)\b|₹/i.test(candidate);
+              if (candidate.length >= 50 && candidate.includes(titleText) && hasListingMetadata) {
+                summaryText = candidate;
+                summaryElement = ancestor;
+                break;
+              }
+            }
+          }
+
           const selectors = [
             "#jobDescriptionText",
             ".jobs-description__content",
             ".jobs-box__html-content",
             ".jobsearch-JobComponent-description",
             ".job-desc-container",
+            "[class*='JDC__dang-inner-html']",
             ".dang-inner-html",
             ".internship_details",
-            ".job_details",
             ".job-description",
             "#job-description",
             "article",
@@ -449,38 +544,108 @@
             "[role='main']",
             "body"
           ];
-          for (const sel of selectors) {
-            const el = document.querySelector(sel);
-            if (el && el.innerText && el.innerText.trim().length >= 60) {
-              return el.innerText.trim().slice(0, 24000);
+          const employerSelectors = [
+            "[class*='jd-header-comp-name']",
+            "[class*='companyName']",
+            "[class*='company-name']",
+            "[data-testid*='company']"
+          ];
+          let employerText = "";
+          const employerRoots = [...new Set([summaryElement, heading && heading.parentElement].filter(Boolean))];
+          for (const root of employerRoots) {
+            for (const selector of employerSelectors) {
+              const candidate = root.querySelector(selector);
+              if (candidate && normalize(candidate.innerText).length >= 2) {
+                employerText = normalize(candidate.innerText);
+                break;
+              }
+            }
+            if (employerText) break;
+          }
+          if (!employerText && heading && heading.parentElement) {
+            const metadataOnly = /^(?:unpaid|paid|internship|full[- ]?time|part[- ]?time|bengaluru|bangalore|remote|hybrid|starts?\b|posted\b|openings?\b|applicants?\b|apply\b|save\b)/i;
+            for (const sibling of heading.parentElement.children) {
+              const candidate = normalize(sibling.innerText);
+              if (sibling !== heading && candidate.length >= 2 && candidate.length <= 120 &&
+                  !metadataOnly.test(candidate) && !candidate.includes(titleText)) {
+                employerText = candidate;
+                break;
+              }
             }
           }
-          return document.body ? document.body.innerText.trim().slice(0, 24000) : "";
+
+          const makeResult = (description, isSpecificDescription) => {
+            const text = summaryText && !normalize(description).includes(summaryText)
+              ? `${summaryText}\n\n${description}`
+              : description;
+            const compensationText = `${summaryText}\n${description}`;
+            const compensationMatch = compensationText.match(/\b(?:unpaid|paid|stipend|salary|compensation|per\s+month|per\s+annum)\b|₹\s?[\d,]+|\bINR\s?[\d,]+/i);
+            const normalizedDescription = normalize(description);
+            const descriptionWordCount = normalizedDescription ? normalizedDescription.split(/\s+/).length : 0;
+            return {
+              text: text.slice(0, 24000),
+              coverage: {
+                fields: {
+                  title: titleText.length >= 4,
+                  employer: Boolean(employerText),
+                  compensation: /\b(?:unpaid|paid|stipend|salary|compensation|per\s+month|per\s+annum)\b|₹|\bINR\b/i.test(compensationText),
+                  description: isSpecificDescription && normalizedDescription.length >= 300 && descriptionWordCount >= 40,
+                  contact: /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|(?:\+?\d[\d\s().-]{7,}\d)|\b(?:whatsapp|telegram|phonepe|paytm)\b/i.test(compensationText)
+                },
+                details: {
+                  title: titleText,
+                  employer: employerText,
+                  compensation: compensationMatch ? compensationMatch[0] : "",
+                  descriptionLength: isSpecificDescription ? normalizedDescription.length : 0,
+                  descriptionWordCount: isSpecificDescription ? descriptionWordCount : 0
+                }
+              }
+            };
+          };
+          for (const sel of selectors) {
+            for (const el of document.querySelectorAll(sel)) {
+              const text = (el && el.innerText ? el.innerText : "").trim();
+              if (text.length >= 60) {
+                const isSpecificDescription = !["main", "[role='main']", "body"].includes(sel);
+                return makeResult(text, isSpecificDescription);
+              }
+            }
+          }
+          const bodyText = document.body ? document.body.innerText.trim() : "";
+          return makeResult(bodyText, false);
         }
       });
 
-      const extracted = injection && injection[0] && injection[0].result;
+      const result = injection && injection[0] && injection[0].result;
+      const extracted = typeof result === "string" ? result : result && result.text;
       if (!extracted || extracted.length < 10) {
         showError("No Job Text Found", "Could not read text on this page. Paste the job description in the box above.");
         return;
       }
 
       jobTextInput.value = extracted;
-      analyzeAndRender(extracted);
+      analyzeAndRender(extracted, result && result.coverage ? result.coverage : null);
     } catch (_err) {
       showError("Cannot Read This Page", "Copy and paste the job text into the box above.");
     }
   }
 
   async function analyzeScreenshot() {
+    resultsView.classList.add("hidden");
     const file = imageUploadInput.files && imageUploadInput.files[0];
     if (!file) {
-      showError("No Screenshot Selected", "Choose a PNG or JPG screenshot file first.");
+      showError("No Screenshot Selected", "Choose a PNG, JPG, or WebP screenshot file first.");
       return;
     }
     hideError();
-    const remoteBackend = !apiBaseUrl.startsWith("http://127.0.0.1") && !apiBaseUrl.startsWith("http://localhost");
-    const destination = new URL(apiBaseUrl).origin;
+    const backendUrl = new URL(apiBaseUrl);
+    const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(backendUrl.hostname);
+    if (backendUrl.protocol !== "https:" && !isLoopback) {
+      showError("HTTPS Required", "Remote screenshot uploads require HTTPS. HTTP is allowed only for a backend running on this computer.");
+      return;
+    }
+    const remoteBackend = !isLoopback;
+    const destination = backendUrl.origin;
     const consentMessage = remoteBackend
       ? `Send this screenshot to ${destination} for OCR? The image may contain personal information. Continue only if you trust this service.`
       : "Send this screenshot to your local ScamShield backend for OCR? The image stays on this computer unless the backend is configured to forward it.";
@@ -500,7 +665,14 @@
       }
       const extracted = (data.ocr_extraction && data.ocr_extraction.extracted_text) || "";
       jobTextInput.value = extracted;
-      analyzeAndRender(extracted);
+      const wordCount = extracted.trim().split(/\s+/).filter(Boolean).length;
+      const ocrNote = (data.ocr_extraction && data.ocr_extraction.confidence_note) ||
+        "OCR can miss or alter characters.";
+      analyzeAndRender(extracted, {
+        source: "ocr",
+        incomplete: true,
+        note: `OCR extracted ${wordCount} words; listing field coverage is unknown. ${ocrNote} Review the text against the screenshot before relying on this result.`
+      });
     } catch (_err) {
       showError(
         "Start Python Server for Screenshots",
@@ -510,7 +682,10 @@
   }
 
   scanPageBtn.addEventListener("click", scanAndCheckCurrentPage);
-  analyzeBtn.addEventListener("click", () => analyzeAndRender(jobTextInput.value));
+  analyzeBtn.addEventListener("click", () => analyzeAndRender(jobTextInput.value, {
+    source: "paste",
+    note: "This text-only check cannot confirm whether the title, employer, pay terms, or contact details were included."
+  }));
   clearTextBtn.addEventListener("click", () => {
     jobTextInput.value = "";
     resultsView.classList.add("hidden");

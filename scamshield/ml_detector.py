@@ -57,8 +57,7 @@ class MLDetector:
 
         if not self.model_path.exists() or not self.model_path.is_file():
             self._load_error = (
-                f"Trained model file not found at '{self.model_path}'. "
-                "Run 'python train_model.py --data-path data/fake_job_postings.csv' to train and save the model."
+                "Trained model artifact is not present. Train the model and configure its artifact path."
             )
             return False
 
@@ -101,20 +100,20 @@ class MLDetector:
 
     def get_health_status(self) -> Dict[str, Any]:
         """Return structured health information for GET /api/health."""
-        model_version = (
-            self._metadata.get("model_version", "1.0.0-tfidf-logreg")
-            if isinstance(self._metadata, dict)
-            else ("1.0.0-tfidf-logreg" if self.is_available else None)
-        )
+        model_version = None
+        if self.is_available:
+            model_version = (
+                self._metadata.get("model_version", "1.0.0-tfidf-logreg")
+                if isinstance(self._metadata, dict)
+                else "1.0.0-tfidf-logreg"
+            )
         return {
             "available": self.is_available,
             "model_type": "TF-IDF + Logistic Regression (scikit-learn)" if self.is_available else None,
-            "model_path": str(self.model_path),
             "model_version": model_version,
             "status_message": (
                 "Trained ML classifier loaded and ready."
-                if self.is_available
-                else (self._load_error or "ML model unavailable.")
+                if self.is_available else "ML scoring is unavailable in this deployment."
             ),
         }
 
@@ -136,14 +135,26 @@ class MLDetector:
                 "model_version": None,
                 "metadata": None,
                 "disclaimer": ML_PREDICTION_DISCLAIMER,
-                "status_message": (
-                    self._load_error
-                    or "ML predictions are unavailable because no trained model is loaded."
-                ),
+                "status_message": "ML scoring is unavailable because no trained model is loaded.",
             }
 
         try:
             input_text = "" if text is None else (text if isinstance(text, str) else str(text))
+            if not input_text.strip():
+                return {
+                    "available": False,
+                    "insufficient_text": True,
+                    "model_loaded": True,
+                    "predicted_label": None,
+                    "predicted_class": None,
+                    "fraud_probability_score": None,
+                    "fraud_score_pct": None,
+                    "is_calibrated_probability": False,
+                    "model_version": None,
+                    "metadata": None,
+                    "disclaimer": ML_PREDICTION_DISCLAIMER,
+                    "status_message": "ML scoring was withheld because the submitted text is empty.",
+                }
             raw_pred = self._pipeline.predict([input_text])[0]
             predicted_label = int(raw_pred)
             predicted_class = (
@@ -155,7 +166,7 @@ class MLDetector:
             fraud_prob: Optional[float] = None
             fraud_pct: Optional[float] = None
             if hasattr(self._pipeline, "predict_proba"):
-                proba_row = self._pipeline.predict_proba([text])[0]
+                proba_row = self._pipeline.predict_proba([input_text])[0]
                 classes = list(getattr(self._pipeline, "classes_", [0, 1]))
                 if 1 in classes:
                     fraud_idx = classes.index(1)
@@ -187,7 +198,7 @@ class MLDetector:
                 "disclaimer": ML_PREDICTION_DISCLAIMER,
                 "status_message": "ML inference completed. Prediction is a statistical estimate, not proof of fraud.",
             }
-        except Exception as exc:
+        except Exception:
             return {
                 "available": False,
                 "predicted_label": None,
@@ -198,5 +209,5 @@ class MLDetector:
                 "model_version": None,
                 "metadata": None,
                 "disclaimer": ML_PREDICTION_DISCLAIMER,
-                "status_message": f"ML model inference encountered an error: {exc}",
+                "status_message": "ML inference failed; no classifier score is available.",
             }

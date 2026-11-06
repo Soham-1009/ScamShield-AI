@@ -85,6 +85,16 @@ def train_and_compare_distilbert(
     separate validation split, and compare with TF-IDF + Logistic Regression on
     a common held-out test split.
     """
+    if epochs < 1:
+        raise ValueError("epochs must be at least 1.")
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1.")
+    if not np.isfinite(learning_rate) or learning_rate <= 0:
+        raise ValueError("learning_rate must be a finite positive number.")
+    if max_length < 8:
+        raise ValueError("max_length must be at least 8 tokens.")
+    if not pretrained_model_name.strip():
+        raise ValueError("pretrained_model_name must not be blank.")
     check_optional_dependencies()
 
     import torch  # type: ignore
